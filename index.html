@@ -99,6 +99,11 @@
   .row.on .no{color:var(--pink);font-weight:800}
   .row .nm{flex:1;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .row .who{font-size:11.5px;color:var(--dim);margin-top:1px}
+  .row .dl{margin-left:9px;width:30px;height:30px;flex:0 0 30px;display:flex;align-items:center;
+     justify-content:center;border-radius:50%;background:rgba(255,255,255,.09);
+     font-size:13px;color:var(--txt);border:1px solid rgba(255,255,255,.1)}
+  .row .dl.on{background:rgba(92,225,255,.18);color:var(--cyan);border-color:rgba(92,225,255,.4);font-weight:800}
+  .row .dl:active{background:rgba(255,255,255,.22)}
   .row .eq{display:flex;gap:2px;align-items:flex-end;height:13px}
   .row .eq i{width:2.5px;background:var(--pink);border-radius:2px;animation:eq .9s ease-in-out infinite}
   .row .eq i:nth-child(2){animation-delay:.15s}.row .eq i:nth-child(3){animation-delay:.3s}
@@ -233,6 +238,63 @@ const openDB=()=>new Promise((res,rej)=>{const r=indexedDB.open('mutown-groove',
   r.onupgradeneeded=()=>r.result.createObjectStore('files');
   r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
 const dbGet=k=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>res(null);});
+const dbPut=(k,v)=>new Promise(res=>{const t=db.transaction('files','readwrite');t.objectStore('files').put(v,k);t.oncomplete=()=>res();});
+const dbKeys=()=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').getAllKeys();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>res([]);});
+
+/* ══════ 离线缓存（加密版 · 2026-09-18 毛毛要求「一定要加密，拼不回去的那种」）══════
+   ① 密钥由浏览器 WebCrypto 现场生成，且标记【不可导出】(extractable=false)：
+      它只以加密形态躺在浏览器数据里 —— 就算有人 root 手机、把整个浏览器目录整个扒走，
+      也拿不到密钥本身 ⇒ 密文解不开，也就拼不回音频。（密钥只在本机、只在这个浏览器里）
+   ② 分片下载后 AES-GCM 加密再落盘；播放时本地解密后喂给播放器，听感没有差别。
+   ③ 断网时由自定义 loader 直接从本地取，完全不碰网络。 */
+const KKEY='__aes_key';
+let aesKey=null;
+async function getKey(){
+  if(aesKey) return aesKey;
+  let k=null;
+  try{ k=await dbGet(KKEY); }catch(e){}
+  if(!k || !(k instanceof CryptoKey)){
+    k=await crypto.subtle.generateKey({name:'AES-GCM',length:256}, false, ['encrypt','decrypt']);
+    await dbPut(KKEY, k);
+  }
+  aesKey=k; return k;
+}
+async function encBuf(buf){                      // 前 12 字节随机 IV + 密文
+  const key=await getKey();
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv}, key, buf);
+  const out=new Uint8Array(12+ct.byteLength); out.set(iv,0); out.set(new Uint8Array(ct),12);
+  return out.buffer;
+}
+async function decBuf(buf){
+  const key=await getKey();
+  const u8=new Uint8Array(buf);
+  return await crypto.subtle.decrypt({name:'AES-GCM',iv:u8.slice(0,12)}, key, u8.subarray(12));
+}
+const segKeyOf = url => { const m=/\/hls\/(\d\d)\/([^?]+)/.exec(url); return m ? 'seg/'+m[1]+'/'+m[2] : null; };
+
+/* 把整首（索引 + 全部分片）加密存到手机 */
+async function cacheSong(i){
+  const song=TRACKS[i].n, tip=$('#tip');
+  if(!await ensureTicket()){ tip.textContent='连不上服务器，等有网了再点'; return; }
+  try{
+    const url=API+'/hls/'+song+'/index.m3u8?t='+encodeURIComponent(ticket)+'&s='+encodeURIComponent(sigs[song]||'');
+    const txt=await (await fetch(url)).text();
+    if(!txt.startsWith('#EXTM3U')){ tip.textContent='取索引失败，稍后再点一次'; return; }
+    const segs=txt.split('\n').map(s=>s.trim()).filter(s=>s && !s.startsWith('#'));
+    await dbPut('m3u8/'+song, txt);                                   // 索引也留着，断网时靠它起播
+    let n=0;
+    for(const u of segs){
+      const k=segKeyOf(u); if(!k) continue;
+      if(await dbGet(k)){ n++; continue; }                            // 已经有了就跳过
+      const r=await fetch(u); if(!r.ok) continue;
+      await dbPut(k, await encBuf(await r.arrayBuffer()));
+      n++; tip.textContent='正在存到手机… '+n+'/'+segs.length;
+    }
+    await renderRows();
+    tip.textContent = n>=segs.length ? '✅ 这首已存在手机里（断网也能听）' : '存了 '+n+'/'+segs.length+' 片，网络不稳可以再点一次';
+  }catch(e){ tip.textContent='存的时候出错了，稍后再点一次'; }
+}
 
 /* ── 票据 ── */
 async function ensureTicket(){
@@ -266,8 +328,21 @@ function paint(){
 /* 建 HLS 实例（只建一次；之后切歌只 loadSource，不再销毁重建 —— 省掉卡顿和一次黑屏）
    缓冲特意调大：默认只预缓冲 30 秒，弱网或切后台时一断就容易停。 */
 function initHls(){
+  // 自定义 loader：分片先查本地（解密后交给播放器），本地没有才走网络
+  const Base = Hls.DefaultConfig.loader;
+  function OffLoader(cfg){ Base.call(this, cfg); }
+  OffLoader.prototype = Object.create(Base.prototype);
+  OffLoader.prototype.load = function(context, config, callbacks){
+    const self=this, goNet=()=>Base.prototype.load.call(self, context, config, callbacks);
+    const k = segKeyOf(context.url);
+    if(!k) return goNet();
+    dbGet(k).then(rec=>{
+      if(!rec) return goNet();
+      decBuf(rec).then(buf=>callbacks.onSuccess({ url:context.url, data:buf, code:200 }, context, null)).catch(goNet);
+    }).catch(goNet);
+  };
   hls = new Hls({
-    enableWorker: true,
+    enableWorker: true, loader: OffLoader,
     maxBufferLength: 60, maxMaxBufferLength: 120,
     maxBufferSize: 60*1000*1000, backBufferLength: 30,
   });
@@ -288,7 +363,18 @@ async function playIdx(i, autoplay=true, seekTo=null){
   if(seekTo!=null) pendingSeek = seekTo;
   const song = TRACKS[i].n;
 
-  // 在线：走 Worker 加密分片
+  // ① 手机里已经存过这首 → 直接用本地那份（断网能听，也不吃网络延迟）
+  try{
+    const localM3U8 = await dbGet('m3u8/'+song);
+    if(localM3U8 && window.Hls && Hls.isSupported()){
+      wantPlay = autoplay; switching = true;
+      if(!hls) initHls();
+      hls.loadSource(URL.createObjectURL(new Blob([localM3U8], { type:'application/vnd.apple.mpegurl' })));
+      return;
+    }
+  }catch(e){}
+
+  // ② 在线：走 Worker 加密分片
   if(navigator.onLine && await ensureTicket()){
     const url = API+'/hls/'+song+'/index.m3u8?t='+encodeURIComponent(ticket)+'&s='+encodeURIComponent(sigs[song]||'');
     if(window.Hls && Hls.isSupported()){
@@ -448,13 +534,17 @@ mask.onclick = ()=>{ openSheet(false); openMode(false); };
 
 /* ── 列表渲染 ── */
 async function renderRows(){
+  const allKeys = await dbKeys();
+  const stored = new Set(allKeys.filter(k=>typeof k==='string' && k.startsWith('m3u8/')).map(k=>k.slice(5)));
   $('#rows').innerHTML='';
   TRACKS.forEach((tr,i)=>{
     const d=document.createElement('div'); d.className='row'+(i===idx?' on':'');
     d.innerHTML='<span class="no">'+(i+1)+'</span>'+
       '<div style="flex:1;min-width:0"><div class="nm">'+tr.t+'</div><div class="who">'+tr.a+'</div></div>'+
-      (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'');
+      (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'')+
+      '<span class="dl'+(stored.has(TRACKS[i].n)?' on':'')+'">'+(stored.has(TRACKS[i].n)?'✓':'⬇')+'</span>';
     d.onclick=()=>{ playIdx(i); openSheet(false); };
+    d.querySelector('.dl').onclick=(ev)=>{ ev.stopPropagation(); cacheSong(i); };
     $('#rows').appendChild(d);
   });
   $('#tip').textContent = '贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首';
