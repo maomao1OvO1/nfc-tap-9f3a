@@ -100,11 +100,6 @@
   .row.on .no{color:var(--pink);font-weight:800}
   .row .nm{flex:1;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .row .who{font-size:11.5px;color:var(--dim);margin-top:1px}
-  .row .dl{margin-left:9px;width:30px;height:30px;flex:0 0 30px;display:flex;align-items:center;
-     justify-content:center;border-radius:50%;background:rgba(255,255,255,.09);
-     font-size:13px;color:var(--txt);border:1px solid rgba(255,255,255,.1)}
-  .row .dl.on{background:rgba(92,225,255,.18);color:var(--cyan);border-color:rgba(92,225,255,.4);font-weight:800}
-  .row .dl.part{background:rgba(255,138,61,.16);color:#ff8a3d;border-color:rgba(255,138,61,.4)}
   .row .dl:active{background:rgba(255,255,255,.22)}
   .row .eq{display:flex;gap:2px;align-items:flex-end;height:13px}
   .row .eq i{width:2.5px;background:var(--pink);border-radius:2px;animation:eq .9s ease-in-out infinite}
@@ -321,63 +316,6 @@ async function decBuf(buf){
 }
 const segKeyOf = url => { const m=/\/hls\/(\d\d)\/([^?]+)/.exec(url); return m ? 'seg/'+m[1]+'/'+m[2] : null; };
 
-/* 下载队列：连点多首时排队跑，避免几十个请求一起挤（这条链路一次请求要好几秒） */
-const dlQueue=[]; let dlBusy=null;
-function queueSong(i){
-  if(dlBusy===i || dlQueue.includes(i)) return;
-  dlQueue.push(i); pumpQueue();
-}
-async function pumpQueue(){
-  if(dlBusy!==null || !dlQueue.length) return;
-  dlBusy = dlQueue.shift();
-  await cacheSong(dlBusy);
-  dlBusy = null;
-  await renderRows();
-  if(dlQueue.length) pumpQueue();
-}
-
-/* 把整首（索引 + 全部分片）加密存到手机；已经存过的分片自动跳过，所以中断后再点是「续传」 */
-async function cacheSong(i){
-  const song=TRACKS[i].n, tip=$('#tip'), nth=TRACKS.findIndex(t=>t.n===song)+1;
-  if(!await ensureTicket()){ tip.textContent='连不上服务器，等有网了再点'; return; }
-  try{
-    const url = await mediaUrl(song, 'index.m3u8');
-    if(!url){ tip.textContent='连不上服务器，等有网了再点'; return; }
-    const txt=await (await fetch(url)).text();
-    if(!txt.startsWith('#EXTM3U')){ tip.textContent='取索引失败，稍后再点一次'; return; }
-    // 只取分片「名字」，地址每片现拼（因为票每 2 分钟就换一次，存死会失效）
-    const segs=txt.split('\n').map(x=>x.trim()).filter(x=>x && !x.startsWith('#'))
-                 .map(x=>{ const m=/\/hls\/\d\d\/([^?]+)/.exec(x); return m?m[1]:null; }).filter(Boolean);
-    await dbPut('m3u8/'+song, txt);                       // 索引留着，断网时靠它起播
-    let done=0, bad=0;
-    const queue=segs.slice();
-    const one=async name=>{
-      const k='seg/'+song+'/'+name;
-      try{
-        if(!await dbGet(k)){                              // 已存过的跳过 → 天然支持续传
-          let ok=false;
-          for(let t=0; t<3 && !ok; t++){                  // 每片最多试 3 次
-            try{
-              const u = await mediaUrl(song, name);       // ★ 每片现拼地址（票轮换也不怕）
-              if(!u) break;
-              const r=await fetch(u);
-              if(r.ok){ await dbPut(k, await encBuf(await r.arrayBuffer())); ok=true; }
-            }catch(err){}
-            if(!ok) await new Promise(r=>setTimeout(r, 700));
-          }
-          if(!ok) bad++;
-        }
-      }catch(err){ bad++; }
-      done++;
-      tip.textContent='正在存到手机… 第 '+nth+' 首 '+done+'/'+segs.length+' 片';
-    };
-    // 5 路并发：一片就要好几秒，串行下太慢；但也不能开太宽，否则互相挤
-    await Promise.all(Array.from({length:5}, async ()=>{ while(queue.length) await one(queue.shift()); }));
-    await renderRows();
-    tip.textContent = bad===0 ? '✅ 第 '+nth+' 首已完整存好（断网也能听）'
-                              : '第 '+nth+' 首存了 '+(segs.length-bad)+'/'+segs.length+' 片，再点一次 ⬇ 会接着补';
-  }catch(err){ tip.textContent='存的时候出错了，稍后再点一次'; }
-}
 
 /* ── 票据 ── */
 // 取票：★ 现在票只发票（2 分钟有效），页面会自动续，正常听歌完全无感
@@ -734,36 +672,15 @@ $('#listBtn').onclick = ()=>openSheet(true);
 mask.onclick = ()=>{ openSheet(false); openMode(false); };
 
 /* ── 列表渲染 ── */
-/* 每首到底存全了没有：拿「已存分片数」和「索引里的分片数」比，别只看索引在不在 */
-async function storedState(){
-  const keys = await dbKeys();
-  const have = {};
-  keys.forEach(k=>{ const m=/^seg\/(\d\d)\//.exec(String(k)); if(m) have[m[1]]=(have[m[1]]||0)+1; });
-  const out = {};
-  for(const tr of TRACKS){
-    const txt = await dbGet('m3u8/'+tr.n);
-    if(!txt){ out[tr.n]={s:'none'}; continue; }
-    const need = String(txt).split('\n').filter(l=>l.trim() && !l.trim().startsWith('#')).length;
-    const got = have[tr.n]||0;
-    out[tr.n] = { s: got>=need ? 'full' : 'part', got, need };
-  }
-  return out;
-}
 async function renderRows(){
-  const st = await storedState();
   $('#rows').innerHTML='';
   TRACKS.forEach((tr,i)=>{
     const d=document.createElement('div'); d.className='row'+(i===idx?' on':'');
     d.innerHTML='<span class="no">'+(i+1)+'</span>'+
       '<div style="flex:1;min-width:0"><div class="nm">'+tr.t+'</div>'+
         '<div class="who">'+(tr.v||tr.r)+(tr.r?'（'+tr.r+'）':'')+(tr.w?' · 词 '+tr.w:'')+'</div></div>'+
-      (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'')+
-      (()=>{ const s=st[TRACKS[i].n]||{s:'none'};
-        return s.s==='full' ? '<span class="dl on">✓</span>'
-             : s.s==='part' ? '<span class="dl part">◐</span>'
-             : '<span class="dl">⬇</span>'; })();
+      (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'');
     d.onclick=()=>{ playIdx(i); openSheet(false); };
-    d.querySelector('.dl').onclick=(ev)=>{ ev.stopPropagation(); queueSong(i); };
     $('#rows').appendChild(d);
   });
   $('#tip').textContent = '贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首';
