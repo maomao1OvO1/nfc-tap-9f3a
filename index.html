@@ -57,8 +57,7 @@
   /* 进度条 */
   .prog{margin:6px 0 20px}
   /* 声浪：贴在进度条上方的一条连续起伏线（不是一根根柱子） */
-  .wave{display:block;width:100%;height:54px;margin:0 0 2px;
-        border-radius:10px;opacity:.9}
+  .wave{display:block;width:100%;height:46px;margin:0 0 6px;opacity:.92}
   .bar{position:relative;height:34px;display:flex;align-items:center;cursor:pointer;touch-action:none}
   .bar .track{position:absolute;left:0;right:0;height:5px;border-radius:99px;
       background:rgba(255,255,255,.16);overflow:hidden}
@@ -186,12 +185,12 @@
   </div>
 
   <div class="prog">
+    <!-- 声浪（贴在进度条“上方”、只朝上长的那半条 · 2026-09-18 毛毛要的） -->
+    <canvas class="wave" id="wave"></canvas>
     <div class="bar" id="bar">
       <div class="track"><div class="fill" id="fill"></div></div>
       <div class="knob" id="knob"></div>
     </div>
-    <!-- 声浪（跟着音乐实时起伏的连续曲线 · 2026-09-18 毛毛要的） -->
-    <canvas class="wave" id="wave"></canvas>
     <div class="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
   </div>
 
@@ -587,32 +586,33 @@ function waveDraw(){
     if(WAVE.pts[i] > 0.004) alive++;
   }
 
-  // 画：上下对称的连续曲线（中间一条轴，两侧起伏）
-  const mid = H/2, amp = H*0.46;
+  // 画：★ 只画上半 —— 基线贴着进度条，声浪往上长（毛毛指定）
+  const base = H, amp = H*0.96;
   const grad = g.createLinearGradient(0,0,W,0);
   grad.addColorStop(0,   'rgba(255,95,162,.85)');   // 粉
   grad.addColorStop(0.5, 'rgba(160,107,255,.85)');  // 紫
   grad.addColorStop(1,   'rgba(92,225,255,.85)');   // 青
   g.beginPath();
-  g.moveTo(0, mid - WAVE.pts[0]*amp);
-  for(let i=1;i<N;i++){                                   // 上半
-    const x = i/(N-1)*W, y = mid - WAVE.pts[i]*amp;
-    const px = (i-1)/(N-1)*W, py = mid - WAVE.pts[i-1]*amp;
+  g.moveTo(0, base);                                      // 左下角起步
+  g.lineTo(0, base - WAVE.pts[0]*amp);
+  for(let i=1;i<N;i++){                                   // 只走上边缘这一条线
+    const x = i/(N-1)*W, y = base - WAVE.pts[i]*amp;
+    const px = (i-1)/(N-1)*W, py = base - WAVE.pts[i-1]*amp;
     g.quadraticCurveTo((px+x)/2, (py+y)/2, x, y);          // 二次曲线 → 连续不生硬
   }
-  for(let i=N-1;i>=0;i--){                                // 下半（镜像）
-    const x = i/(N-1)*W, y = mid + WAVE.pts[i]*amp;
-    const nx = Math.min(i+1,N-1)/(N-1)*W, ny = mid + WAVE.pts[Math.min(i+1,N-1)]*amp;
-    g.quadraticCurveTo((nx+x)/2, (ny+y)/2, x, y);
-  }
+  g.lineTo(W, base);                                      // 收右下角
   g.closePath();
   g.fillStyle = grad;
   g.shadowColor = 'rgba(255,95,162,.5)';
   g.shadowBlur = 12;
   g.fill();
   g.shadowBlur = 0;
-  g.strokeStyle = 'rgba(255,255,255,.28)';
+  g.strokeStyle = 'rgba(255,255,255,.32)';   // 上边缘的高光
   g.lineWidth = 1;
+  g.stroke();
+  g.beginPath();                              // 底部一条细亮线，和进度条咬合
+  g.moveTo(0, base - 0.5); g.lineTo(W, base - 0.5);
+  g.strokeStyle = 'rgba(255,255,255,.18)';
   g.stroke();
 
   // 全部落回零 → 停掉循环省电（下次播放会自动重启）
