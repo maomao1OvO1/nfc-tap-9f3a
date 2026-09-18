@@ -674,6 +674,15 @@ $('#listChip').onclick = ()=>openSheet(true);
 
 /* ── 启动 ── */
 (async function(){
+  /* 「去缓存」专用入口（2026-09-18 给毛毛做的）：
+     打开  ?fresh=1  就自动把本地页面缓存和 Service Worker 清干净，再带着新时间戳重开。
+     清缓存不会碰到音频 —— 歌存在另一个地方（IndexedDB），照旧都在。 */
+  if(new URLSearchParams(location.search).has('fresh')){
+    try{ const r = await navigator.serviceWorker.getRegistration(); if(r) await r.unregister(); }catch(e){}
+    try{ for(const n of await caches.keys()) await caches.delete(n); }catch(e){}
+    location.replace(location.pathname + '?v=' + Date.now());
+    return;
+  }
   try{ db=await openDB(); }catch(e){}
   if('serviceWorker' in navigator){ try{ await navigator.serviceWorker.register('./sw.js'); }catch(e){} }
   applyMode(); await renderRows(); paint();
