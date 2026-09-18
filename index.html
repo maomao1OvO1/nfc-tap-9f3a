@@ -37,14 +37,11 @@
   .dot.off{background:#ff8a3d;box-shadow:0 0 8px #ff8a3d}
 
   /* 封面 */
-  /* 唱片：圆形 + 中心孔 + 外圈纹路，播放时整张圆盘旋转 */
+  /* 唱片：圆形 + 中心孔（2026-09-18 毛毛说黑胶纹路很丑 → 已整条删除，只留凿出来的洞） */
   .cover{position:relative;margin:10px auto 22px;width:74vw;max-width:290px;aspect-ratio:1/1;
          border-radius:50%;overflow:hidden;
          box-shadow:0 26px 60px -16px rgba(255,95,162,.6), 0 10px 30px rgba(0,0,0,.55),
                     inset 0 0 0 1px rgba(255,255,255,.14)}
-  .cover::before{content:'';position:absolute;inset:0;border-radius:50%;z-index:3;pointer-events:none;
-     background:repeating-radial-gradient(circle at 50% 50%,
-        rgba(255,255,255,.05) 0 1.5px, rgba(255,255,255,0) 1.5px 5px)}   /* 黑胶纹路 */
   .cover::after{content:'';position:absolute;left:50%;top:50%;width:26%;height:26%;
      transform:translate(-50%,-50%);border-radius:50%;z-index:4;pointer-events:none;
      background:radial-gradient(circle,#12071f 0 34%, #f6e6ff 36% 44%, #12071f 46% 100%);
@@ -179,7 +176,9 @@
 </div>
 <audio id="player" preload="metadata" playsinline></audio>
 
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<!-- HLS 播放核心：改用同源本地文件（原来走 jsdelivr CDN，413 KB 实测要 10 秒才能下完；
+     一旦超时或断流 window.Hls 就是 undefined，Chrome 又不能原生播 HLS → 歌直接放不出来） -->
+<script src="./hls.min.js"></script>
 <script>
 const API = 'https://nfc-tap.maomao1ovo1.workers.dev';
 
