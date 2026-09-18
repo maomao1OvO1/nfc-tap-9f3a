@@ -130,6 +130,10 @@
         transition:opacity .3s}
   .mask.on{opacity:1;pointer-events:auto}
   .hint{text-align:center;font-size:11.5px;color:rgba(255,247,255,.42);margin-top:12px;line-height:1.6}
+  /* 专辑出处（dizzylab 徽章）——低调放底部，不抢播放器 */
+  .src{display:flex;flex-direction:column;align-items:center;gap:8px;margin:18px 0 6px;opacity:.85}
+  .src img{display:block;border-radius:8px}
+  .src span{font-size:11px;color:rgba(255,247,255,.34);letter-spacing:.3px}
   .sheet .cta{width:100%;margin-top:10px;background:rgba(255,255,255,.09);
      border:1px solid rgba(255,255,255,.15);color:var(--txt);border-radius:12px;padding:12px;
      font-size:13.5px;font-weight:600}
@@ -148,7 +152,7 @@
   <div class="meta">
     <div class="song" id="song">见习恶魔</div>
     <div class="artist" id="artist">Buro</div>
-    <div class="album" id="album">MUSE DASH ORIGINAL SONG ALBUM</div>
+    <div class="album" id="album">Mutown Grooove</div>
   </div>
 
   <div class="prog">
@@ -182,6 +186,13 @@
     <button class="chip" id="listChip">☰ 播放列表</button>
   </div>
   <p class="hint" id="tip">贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首</p>
+  <!-- 专辑出处（dizzylab 官方给的嵌入徽章）：想收实体或支持作者，从这里去 -->
+  <div class="src">
+    <a href="https://dizzylab.net/d/DLCD06/" target="_blank" rel="noopener">
+      <img src="https://dizzylab.net/embed.svg?id=DLCD06" width="250" height="80" alt="Mutown Grooove @ dizzylab">
+    </a>
+    <span>十首歌出自这张专辑 · 喜欢就去支持一下</span>
+  </div>
 </div>
 
 <div class="mask" id="mask"></div>
