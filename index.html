@@ -39,8 +39,11 @@
          box-shadow:0 26px 60px -16px rgba(255,95,162,.6), 0 10px 30px rgba(0,0,0,.55),
                     inset 0 0 0 1px rgba(255,255,255,.14)}
   .cover img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%}
-  .cover .disc{width:100%;height:100%;border-radius:50%;overflow:hidden}
-  .cover.spin .disc{animation:sp 20s linear infinite}
+  /* 常驻旋转动画：用 animation-play-state 控制启停 —— 暂停时角度保留，
+     切歌不会「转回原点」（2026-09-18 毛毛要求：切歌要接着转，别恢复原状） */
+  .cover .disc{width:100%;height:100%;border-radius:50%;overflow:hidden;
+     animation:sp 20s linear infinite;animation-play-state:paused}
+  .cover.playing .disc{animation-play-state:running}
   @keyframes sp{to{transform:rotate(360deg)}}
 
   /* 歌名 */
@@ -218,6 +221,8 @@ const TRACKS = [
 const $ = s => document.querySelector(s);
 const player=$('#player'), bg=$('#bg');
 let db=null, idx=-1, ticket=null, sigs={}, expAt=0, hls=null;
+let switching=false, wantPlay=true, pendingSeek=null;   // 切歌中 / 本次加载后是否自动播 / 待恢复的进度
+const SKEY='mg-state';                                  // 播放状态存档键（刷新后回到原处）
 const urls={}; let dragging=false;
 
 /* 禁止右键/长按下载入口 */
@@ -258,28 +263,47 @@ function paint(){
 }
 
 /* ── 播放 ── */
-async function playIdx(i, autoplay=true){
+/* 建 HLS 实例（只建一次；之后切歌只 loadSource，不再销毁重建 —— 省掉卡顿和一次黑屏）
+   缓冲特意调大：默认只预缓冲 30 秒，弱网或切后台时一断就容易停。 */
+function initHls(){
+  hls = new Hls({
+    enableWorker: true,
+    maxBufferLength: 60, maxMaxBufferLength: 120,
+    maxBufferSize: 60*1000*1000, backBufferLength: 30,
+  });
+  hls.attachMedia(player);
+  hls.on(Hls.Events.MANIFEST_PARSED, ()=>{ switching=false; if(wantPlay) player.play().catch(()=>{}); });
+  hls.on(Hls.Events.ERROR, (ev, data)=>{
+    if(!data || !data.fatal) return;
+    switching = false;
+    if(data.type === Hls.ErrorTypes.NETWORK_ERROR){ $('#tip').textContent='网络不稳，正在重连…'; hls.startLoad(); }
+    else if(data.type === Hls.ErrorTypes.MEDIA_ERROR){ hls.recoverMediaError(); }
+    else { $('#tip').textContent='这一首暂时放不出来，换一首试试'; }
+  });
+}
+
+async function playIdx(i, autoplay=true, seekTo=null){
   if(i<0||i>=TRACKS.length) return;
   idx=i; paint();
+  if(seekTo!=null) pendingSeek = seekTo;
   const song = TRACKS[i].n;
 
   // 在线：走 Worker 加密分片
   if(navigator.onLine && await ensureTicket()){
     const url = API+'/hls/'+song+'/index.m3u8?t='+encodeURIComponent(ticket)+'&s='+encodeURIComponent(sigs[song]||'');
     if(window.Hls && Hls.isSupported()){
-      if(hls) hls.destroy();
-      hls = new Hls({ enableWorker:true });
-      hls.loadSource(url); hls.attachMedia(player);
-      hls.on(Hls.Events.MANIFEST_PARSED, ()=>{ if(autoplay) player.play().catch(()=>{}); });
+      wantPlay = autoplay; switching = true;
+      if(!hls) initHls();
+      hls.loadSource(url);
       return;
     }
     player.src = url; if(autoplay) player.play().catch(()=>{});
     return;
   }
-  // 离线：本地那份
+  // 连不上服务器：本地那份能用就用，否则如实提示
   if(!urls[i]){ const b=await dbGet(song); if(b) urls[i]=URL.createObjectURL(b); }
   if(urls[i]){ player.src=urls[i]; if(autoplay) player.play().catch(()=>{}); }
-  else { $('#tip').textContent='⚠️ 没网、本地也没存这首 —— 打开列表点「存到手机」先存一份'; }
+  else { $('#tip').textContent='⚠️ 现在连不上服务器，等有网了再点一下播放'; }
 }
 
 /* ── 进度条 ── */
@@ -297,10 +321,27 @@ player.addEventListener('timeupdate', tickUI);
 player.addEventListener('loadedmetadata', tickUI);
 player.addEventListener('durationchange', tickUI);
 player.addEventListener('ended', ()=>{ const n=nextIdx(); if(n>=0) playIdx(n); });
+/* 新流加载完成后，把上次的位置接回去（刷新页面也能接着听） */
+player.addEventListener('loadedmetadata', ()=>{
+  if(pendingSeek!=null){ try{ player.currentTime = pendingSeek; }catch(e){} pendingSeek=null; }
+});
 player.addEventListener('play', ()=>{ $('#playIcon').innerHTML='<path d="M7 5h4v14H7zm6 0h4v14h-4z"/>';
-  $('#cover').classList.add('spin'); mediaMeta(); });
+  $('#cover').classList.add('playing'); mediaMeta(); mediaState('playing'); saveState(); });
 player.addEventListener('pause',()=>{ $('#playIcon').innerHTML='<path d="M7 5v14l12-7z"/>';
-  $('#cover').classList.remove('spin'); mediaMeta(); });
+  $('#cover').classList.remove('playing');
+  if(!switching){ mediaMeta(); mediaState('paused'); }   // 切歌中的 pause 不算数，免得系统卡片闪
+  saveState(); });
+
+/* ── 记住播放状态：刷新 / 重开页面后回到同一首、同一进度 ── */
+let saveTick=0;
+function saveState(){
+  if(idx<0) return;
+  try{
+    localStorage.setItem(SKEY, JSON.stringify({ i:idx, t:player.currentTime||0, p:!player.paused, at:Date.now() }));
+  }catch(e){}
+}
+player.addEventListener('timeupdate', ()=>{ const n=Date.now(); if(n-saveTick>3000){ saveTick=n; saveState(); } });
+window.addEventListener('pagehide', saveState);
 
 /* 拖动进度：拖动过程只更新界面（不 seek，避免卡），松手那一刻才真正跳 */
 const bar=$('#bar');
@@ -359,8 +400,12 @@ function mediaMeta(){
       title: tr.t, artist: tr.a, album: 'Mutown Grooove',
       artwork: [{ src:'./cover.jpg', sizes:'512x512', type:'image/jpeg' }]
     });
-    navigator.mediaSession.playbackState = player.paused ? 'paused' : 'playing';
   }catch(e){}
+}
+/* 播放状态单独更新：切歌过程里不去碰它，锁屏 / 灵动胶囊那块才不会「闪一下消失再出现」 */
+function mediaState(s){
+  if(!('mediaSession' in navigator)) return;
+  try{ navigator.mediaSession.playbackState = s; }catch(e){}
 }
 if('mediaSession' in navigator){
   const ms = navigator.mediaSession;
@@ -424,6 +469,12 @@ $('#listChip').onclick = ()=>openSheet(true);
   if('serviceWorker' in navigator){ try{ await navigator.serviceWorker.register('./sw.js'); }catch(e){} }
   applyMode(); await renderRows(); paint();
   ensureTicket();
+  // 接着上次听：曲目 + 进度都恢复（浏览器不允许自动播时，就只回到那个位置，点一下继续）
+  let st=null; try{ st = JSON.parse(localStorage.getItem(SKEY)||'null'); }catch(e){}
+  if(st && Number.isInteger(st.i) && st.i>=0 && st.i<TRACKS.length){
+    idx = st.i; paint();
+    playIdx(st.i, !!st.p, (st.t && st.t>5) ? st.t : null);
+  }
 })();
 </script>
 </body>
