@@ -132,6 +132,7 @@
         transition:opacity .3s}
   .mask.on{opacity:1;pointer-events:auto}
   .hint{text-align:center;font-size:11.5px;color:rgba(255,247,255,.42);margin-top:12px;line-height:1.6}
+  .hint:empty{display:none}   /* 没话可说时压根不占位置 */
   /* ── 宽屏适配（电脑 / 手机开「电脑版网站」）──────────────────────
      手机上是竖着一列；一旦视口变宽（≥820px），改成左右分栏：
      封面固定在左侧一列，歌名/进度/按钮/徽章全部排到右边。
@@ -221,7 +222,8 @@
     <button class="chip" id="modeChip">🔁 列表循环</button>
     <button class="chip" id="listChip">☰ 播放列表</button>
   </div>
-  <p class="hint" id="tip">贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首</p>
+  <!-- 提示栏：平时是空的（不占位），只有出错时才显示一句话 -->
+  <p class="hint" id="tip"></p>
   <!-- 专辑出处（dizzylab 官方给的嵌入徽章）：想收实体或支持作者，从这里去 -->
   <div class="src">
     <a href="https://dizzylab.net/d/DLCD06/" target="_blank" rel="noopener">
@@ -481,7 +483,6 @@ async function playLocal(song, autoplay, seekTo){
     try{ data = await decBuf(rec); }catch(e){ continue; }   // 解密在本地完成
     if(sb.updating) await waitDone();
     try{ sb.appendBuffer(data); }catch(e){ try{ await waitDone(); sb.appendBuffer(data); }catch(e2){} }
-    $('#tip').textContent = '正在从手机里读… ' + (n+1) + '/' + segs.length + ' 片';
   }
   if(token.aborted) return true;
   if(sb.updating) await waitDone();
@@ -786,7 +787,6 @@ async function renderRows(){
     d.onclick=()=>{ playIdx(i); openSheet(false); };
     $('#rows').appendChild(d);
   });
-  $('#tip').textContent = '贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首';
 }
 
 /* ── 播放列表抽屉入口（2026-09-18 按毛毛要求：离线缓存整块删除 —— 本页只在线听、不提供下载）── */
