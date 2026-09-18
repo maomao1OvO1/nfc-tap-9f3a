@@ -32,9 +32,6 @@
   /* 顶栏 */
   .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
   .top .t1{font-size:12.5px;letter-spacing:2px;color:var(--dim);text-transform:uppercase}
-  .top .t2{font-size:12.5px;color:var(--dim);display:flex;gap:6px;align-items:center}
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
-  .dot.off{background:#ff8a3d;box-shadow:0 0 8px #ff8a3d}
 
   /* 封面（2026-09-18 毛毛定稿：只要一张圆封面 —— 黑胶纹路不要、中心孔也不要；播放时整张圆盘慢慢转） */
   .cover{position:relative;margin:10px auto 22px;width:74vw;max-width:290px;aspect-ratio:1/1;
@@ -135,7 +132,6 @@
 <div class="wrap">
   <div class="top">
     <div class="t1">Mutown Grooove</div>
-    <div class="t2"><span class="dot" id="net"></span><span id="netTxt">在线</span></div>
   </div>
 
   <div class="cover" id="cover"><div class="disc"><img src="./cover.jpg" alt="cover"></div></div>
@@ -175,7 +171,6 @@
   <div class="foot">
     <button class="chip" id="modeChip">🔁 列表循环</button>
     <button class="chip" id="listChip">☰ 播放列表</button>
-    <button class="chip" id="pipBtn">⧉ 悬浮小窗</button>
   </div>
   <p class="hint" id="tip">贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首</p>
 </div>
@@ -351,7 +346,7 @@ function nextIdx(){
 /* ══════ 系统能力接入（2026-09-18 毛毛要求）══════
    说明：真正的「灵动胶囊 / 流体云 / 实时活动」是系统发给**原生 App** 的能力，
    网页（浏览器里的一个网址）申请不到，这点没法绕。
-   但下面这两样是网页确实能接的系统能力，效果最接近他想要的那个「岛」： */
+   这里接的是网页确实能接的那一项系统能力（画中画那一套毛毛说没用，已按他要求删除）： */
 
 /* ① 系统媒体控制（Media Session API）—— 锁屏 / 通知栏 / 蓝牙耳机
    接上之后：系统把本页当成一个正经音乐播放器 —— 锁屏和通知栏会显示封面 + 歌名，
@@ -379,45 +374,6 @@ if('mediaSession' in navigator){
   on('seekto',        e=>{ if(e.seekTime!=null) player.currentTime = e.seekTime; });
 }
 
-/* ② 悬浮小窗（画中画 PiP）—— 网页唯一能做出「挂在屏幕上的小窗」的办法 */
-let pv=null, pc=null, pImg=null, pTimer=null;
-function paintPiP(){
-  if(!pc) return;
-  const g = pc.getContext('2d'), W = pc.width, H = pc.height;
-  g.fillStyle = '#160a1e'; g.fillRect(0,0,W,H);
-  if(pImg && pImg.complete){                     // 封面铺底
-    const s = Math.min(pImg.width, pImg.height);
-    g.drawImage(pImg, (pImg.width-s)/2, (pImg.height-s)/2, s, s, 0, 0, W, W);
-  }
-  const tr = TRACKS[idx] || TRACKS[0];
-  g.fillStyle = 'rgba(10,4,16,.72)'; g.fillRect(0, H-118, W, 118);
-  g.textAlign = 'center';
-  g.fillStyle = '#fff'; g.font = 'bold 34px sans-serif';
-  const name = tr.t.length > 11 ? tr.t.slice(0,11)+'…' : tr.t;
-  g.fillText(name, W/2, H-72);
-  g.fillStyle = 'rgba(255,247,255,.6)'; g.font = '26px sans-serif';
-  g.fillText(tr.a + (player.paused ? ' · 已暂停' : ' · 播放中'), W/2, H-32);
-}
-async function togglePiP(){
-  if(!('requestPictureInPicture' in HTMLVideoElement.prototype)){
-    $('#tip').textContent = '这台手机的浏览器不支持悬浮小窗'; return;
-  }
-  if(document.pictureInPictureElement){ try{ await document.exitPictureInPicture(); }catch(e){} return; }
-  if(!pv){
-    pc = document.createElement('canvas'); pc.width = 480; pc.height = 480;
-    pImg = new Image(); pImg.src = './cover.jpg';
-    pv = document.createElement('video'); pv.muted = true; pv.playsInline = true;
-    pv.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px';
-    document.body.appendChild(pv);
-    pv.srcObject = pc.captureStream(4);
-    await pv.play().catch(()=>{});
-  }
-  paintPiP();
-  clearInterval(pTimer); pTimer = setInterval(paintPiP, 1000);   // 切歌/暂停时画面跟着变
-  try{ await pv.requestPictureInPicture(); }catch(e){ $('#tip').textContent = '进小窗失败，可能被系统拦了'; }
-}
-$('#pipBtn').onclick = togglePiP;
-document.addEventListener('leavepictureinpicture', ()=>{ clearInterval(pTimer); }, true);
 
 /* ── 播放模式面板（2026-09-18 毛毛要求）──
    原来点模式按钮只能「循环盲切」四种模式，看不出有哪几种、也看不出当前是哪个；
@@ -462,16 +418,11 @@ async function renderRows(){
 /* ── 播放列表抽屉入口（2026-09-18 按毛毛要求：离线缓存整块删除 —— 本页只在线听、不提供下载）── */
 $('#listChip').onclick = ()=>openSheet(true);
 
-/* ── 网络状态 ── */
-function netUI(){ const on=navigator.onLine; $('#net').className='dot'+(on?'':' off');
-  $('#netTxt').textContent = on?'在线 · 加密分片':'离线 · 本地播放'; }
-window.addEventListener('online', netUI); window.addEventListener('offline', netUI);
-
 /* ── 启动 ── */
 (async function(){
   try{ db=await openDB(); }catch(e){}
   if('serviceWorker' in navigator){ try{ await navigator.serviceWorker.register('./sw.js'); }catch(e){} }
-  applyMode(); netUI(); await renderRows(); paint();
+  applyMode(); await renderRows(); paint();
   ensureTicket();
 })();
 </script>
