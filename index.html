@@ -586,10 +586,9 @@ function waveDraw(){
     const b = Math.max(a+1, Math.floor(Math.pow((i+1)/N, 1.25) * bins * 0.72));
     let m = 0; for(let j=a;j<b && j<bins;j++) m = Math.max(m, WAVE.data[j]);
     // ★ 两端渐隐：正弦窗，越靠左右边缘越收 —— 免得声浪被垂直切一刀（毛毛说太生硬）
-    // 只收最左右各一小段：幂次拉低 → 曲线变"方"，20% 处就回到 83%，
-    // 中间大片区域保持原样（上一版用纯正弦把中间也压平了，毛毛说太平滑）
-    const w = Math.pow(Math.sin(Math.PI * i / (N - 1)), 0.35);
-    const target = (m / 255) * w;
+    // ★ 不再压高度了 —— 两端改用「淡出」处理（见下方遮罩），
+    //   压高度怎么调都会显得"被削平、被压"，毛毛连着两次都不满意
+    const target = m / 255;
     // ★ 上升要快、下降要慢 —— 这就是"关闭音乐后缓慢降落"的关键
     if(target >= WAVE.pts[i]) WAVE.pts[i] = target;
     else WAVE.pts[i] += (target - WAVE.pts[i]) * 0.075;      // 0.075 ≈ 0.8 秒落回，仍有缓降感
@@ -622,6 +621,18 @@ function waveDraw(){
   g.lineJoin = 'round';
   g.lineCap = 'round';
   g.stroke();
+
+  // ★ 两端羽化：高度一点不动，只让最左右慢慢变透明 —— 边界"化"进背景，
+  //   既不硬切也不像被压。用 destination-in 把一层横向渐变"乘"到已画好的图形上。
+  g.globalCompositeOperation = 'destination-in';
+  const mask = g.createLinearGradient(0, 0, W, 0);
+  mask.addColorStop(0,    'rgba(0,0,0,0)');
+  mask.addColorStop(0.10, 'rgba(0,0,0,1)');
+  mask.addColorStop(0.90, 'rgba(0,0,0,1)');
+  mask.addColorStop(1,    'rgba(0,0,0,0)');
+  g.fillStyle = mask;
+  g.fillRect(0, 0, W, H);
+  g.globalCompositeOperation = 'source-over';
   g.beginPath();                              // 底部一条细亮线，和进度条咬合
   g.moveTo(0, base - 0.5); g.lineTo(W, base - 0.5);
   g.strokeStyle = 'rgba(255,255,255,.18)';
