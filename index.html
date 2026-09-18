@@ -60,12 +60,15 @@
   /* 声浪紧贴进度条上沿：下边距给 0，靠文档流自然相接 ——
      注意不能用负边距去“压”，那会盖住进度条的触摸区，进度条就拖不动了 */
   .wave{display:block;width:100%;height:46px;margin:0;opacity:.92}
-  .bar{position:relative;height:34px;display:flex;align-items:center;cursor:pointer;touch-action:none}
-  .bar .track{position:absolute;left:0;right:0;height:5px;border-radius:99px;
+  /* 高度 34 → 24：原来 34px 里轨道居中，上下各空 14.5px —— 声浪够不着，
+     现在压扁并把轨道顶到最上沿，声浪就能直接咬住它。
+     24px 的触摸区手指照样点得中，进度条拖动手感不受影响 */
+  .bar{position:relative;height:24px;display:flex;align-items:flex-start;cursor:pointer;touch-action:none}
+  .bar .track{position:absolute;left:0;right:0;top:0;height:5px;border-radius:99px;
       background:rgba(255,255,255,.16);overflow:hidden}
   .bar .fill{height:100%;width:0%;
       background:linear-gradient(90deg,var(--pink),var(--purple),var(--cyan));border-radius:99px}
-  .bar .knob{position:absolute;width:13px;height:13px;border-radius:50%;background:#fff;
+  .bar .knob{position:absolute;top:-4px;width:13px;height:13px;border-radius:50%;background:#fff;
       box-shadow:0 0 12px var(--pink);transform:translateX(-50%);left:0;opacity:0;transition:opacity .2s}
   .bar:hover .knob,.bar.active .knob{opacity:1}
   .times{display:flex;justify-content:space-between;font-size:11.5px;color:var(--dim);margin-top:1px;
