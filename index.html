@@ -555,7 +555,7 @@ function waveInit(){
     WAVE.src = WAVE.ctx.createMediaElementSource(player);   // ★ 一个 audio 只能接一次
     WAVE.an  = WAVE.ctx.createAnalyser();
     WAVE.an.fftSize = 512;
-    WAVE.an.smoothingTimeConstant = 0.8;
+    WAVE.an.smoothingTimeConstant = 0.68;   // 0.8 太糊，0.68 起伏更清楚
     WAVE.src.connect(WAVE.an);
     WAVE.an.connect(WAVE.ctx.destination);                  // 别把声音断了
     WAVE.data = new Uint8Array(WAVE.an.frequencyBinCount);
@@ -586,11 +586,13 @@ function waveDraw(){
     const b = Math.max(a+1, Math.floor(Math.pow((i+1)/N, 1.25) * bins * 0.72));
     let m = 0; for(let j=a;j<b && j<bins;j++) m = Math.max(m, WAVE.data[j]);
     // ★ 两端渐隐：正弦窗，越靠左右边缘越收 —— 免得声浪被垂直切一刀（毛毛说太生硬）
-    const w = Math.sin(Math.PI * i / (N - 1));   // 两端 0，正中间 1（不衰减）
+    // 只收最左右各一小段：幂次拉低 → 曲线变"方"，20% 处就回到 83%，
+    // 中间大片区域保持原样（上一版用纯正弦把中间也压平了，毛毛说太平滑）
+    const w = Math.pow(Math.sin(Math.PI * i / (N - 1)), 0.35);
     const target = (m / 255) * w;
     // ★ 上升要快、下降要慢 —— 这就是"关闭音乐后缓慢降落"的关键
     if(target >= WAVE.pts[i]) WAVE.pts[i] = target;
-    else WAVE.pts[i] += (target - WAVE.pts[i]) * 0.055;      // 0.055 ≈ 一秒左右落回
+    else WAVE.pts[i] += (target - WAVE.pts[i]) * 0.075;      // 0.075 ≈ 0.8 秒落回，仍有缓降感
     if(WAVE.pts[i] > 0.004) alive++;
   }
 
