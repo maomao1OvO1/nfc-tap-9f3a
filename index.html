@@ -100,7 +100,6 @@
   .row.on .no{color:var(--pink);font-weight:800}
   .row .nm{flex:1;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .row .who{font-size:11.5px;color:var(--dim);margin-top:1px}
-  .row .dl:active{background:rgba(255,255,255,.22)}
   .row .eq{display:flex;gap:2px;align-items:flex-end;height:13px}
   .row .eq i{width:2.5px;background:var(--pink);border-radius:2px;animation:eq .9s ease-in-out infinite}
   .row .eq i:nth-child(2){animation-delay:.15s}.row .eq i:nth-child(3){animation-delay:.3s}
@@ -284,7 +283,9 @@ const dbGet=k=>new Promise(res=>{const t=db.transaction('files','readonly');cons
 const dbPut=(k,v)=>new Promise(res=>{const t=db.transaction('files','readwrite');t.objectStore('files').put(v,k);t.oncomplete=()=>res();});
 const dbKeys=()=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').getAllKeys();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>res([]);});
 
-/* ══════ 离线缓存（加密版 · 2026-09-18 毛毛要求「一定要加密，拼不回去的那种」）══════
+/* ══════ 本地播放（读手机里已存的加密分片 · 2026-09-18）══════
+   注：整首「下载」功能已于同日按毛毛要求移除（防批量扒取），
+   但这条读取链路保留 —— 之前已经存进手机的 227 片仍可离线播放。
    ① 密钥由浏览器 WebCrypto 现场生成，且标记【不可导出】(extractable=false)：
       它只以加密形态躺在浏览器数据里 —— 就算有人 root 手机、把整个浏览器目录整个扒走，
       也拿不到密钥本身 ⇒ 密文解不开，也就拼不回音频。（密钥只在本机、只在这个浏览器里）
