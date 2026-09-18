@@ -175,6 +175,7 @@
   <div class="foot">
     <button class="chip" id="modeChip">🔁 列表循环</button>
     <button class="chip" id="listChip">☰ 播放列表</button>
+    <button class="chip" id="pipBtn">⧉ 悬浮小窗</button>
   </div>
   <p class="hint" id="tip">贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首</p>
 </div>
@@ -246,6 +247,7 @@ function paint(){
   const tr = TRACKS[idx] || TRACKS[0];
   $('#song').textContent = tr.t;
   $('#artist').textContent = tr.a;
+  mediaMeta();   // 同步给系统：锁屏 / 通知栏的封面、歌名、播放状态
   // 音柱（正在播放的跳动标记）跟着当前曲目走
   // 2026-09-18 修：原来音柱只在首次渲染时插进对应项，之后切歌不再重建 → 它永远停在老位置
   document.querySelectorAll('#rows .row').forEach((r,k)=>{
@@ -301,9 +303,9 @@ player.addEventListener('loadedmetadata', tickUI);
 player.addEventListener('durationchange', tickUI);
 player.addEventListener('ended', ()=>{ const n=nextIdx(); if(n>=0) playIdx(n); });
 player.addEventListener('play', ()=>{ $('#playIcon').innerHTML='<path d="M7 5h4v14H7zm6 0h4v14h-4z"/>';
-  $('#cover').classList.add('spin'); });
+  $('#cover').classList.add('spin'); mediaMeta(); });
 player.addEventListener('pause',()=>{ $('#playIcon').innerHTML='<path d="M7 5v14l12-7z"/>';
-  $('#cover').classList.remove('spin'); });
+  $('#cover').classList.remove('spin'); mediaMeta(); });
 
 /* 拖动进度：拖动过程只更新界面（不 seek，避免卡），松手那一刻才真正跳 */
 const bar=$('#bar');
@@ -346,6 +348,77 @@ function nextIdx(){
   if(mode==='shuffle'){ if(TRACKS.length<2) return idx; let n; do{n=Math.floor(Math.random()*TRACKS.length);}while(n===idx); return n; }
   const nx=idx+1; if(nx<TRACKS.length) return nx; return mode==='all'?0:-1;
 }
+/* ══════ 系统能力接入（2026-09-18 毛毛要求）══════
+   说明：真正的「灵动胶囊 / 流体云 / 实时活动」是系统发给**原生 App** 的能力，
+   网页（浏览器里的一个网址）申请不到，这点没法绕。
+   但下面这两样是网页确实能接的系统能力，效果最接近他想要的那个「岛」： */
+
+/* ① 系统媒体控制（Media Session API）—— 锁屏 / 通知栏 / 蓝牙耳机
+   接上之后：系统把本页当成一个正经音乐播放器 —— 锁屏和通知栏会显示封面 + 歌名，
+   并且能直接暂停 / 上一首 / 下一首 / 拖进度；切到后台或锁屏也不会断。 */
+function mediaMeta(){
+  if(!('mediaSession' in navigator)) return;
+  const tr = TRACKS[idx] || TRACKS[0];
+  try{
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: tr.t, artist: tr.a, album: 'Mutown Grooove',
+      artwork: [{ src:'./cover.jpg', sizes:'512x512', type:'image/jpeg' }]
+    });
+    navigator.mediaSession.playbackState = player.paused ? 'paused' : 'playing';
+  }catch(e){}
+}
+if('mediaSession' in navigator){
+  const ms = navigator.mediaSession;
+  const on = (a,f)=>{ try{ ms.setActionHandler(a,f); }catch(e){} };   // 个别机型不支持某些动作，忽略即可
+  on('play',          ()=>player.play().catch(()=>{}));
+  on('pause',         ()=>player.pause());
+  on('previoustrack', ()=>playIdx(idx<=0 ? TRACKS.length-1 : idx-1));
+  on('nexttrack',     ()=>{ const n=nextIdx(); playIdx(n>=0?n:0); });
+  on('seekbackward',  ()=>{ player.currentTime = Math.max(0, player.currentTime-10); });
+  on('seekforward',   ()=>{ player.currentTime = Math.min(player.duration||0, player.currentTime+10); });
+  on('seekto',        e=>{ if(e.seekTime!=null) player.currentTime = e.seekTime; });
+}
+
+/* ② 悬浮小窗（画中画 PiP）—— 网页唯一能做出「挂在屏幕上的小窗」的办法 */
+let pv=null, pc=null, pImg=null, pTimer=null;
+function paintPiP(){
+  if(!pc) return;
+  const g = pc.getContext('2d'), W = pc.width, H = pc.height;
+  g.fillStyle = '#160a1e'; g.fillRect(0,0,W,H);
+  if(pImg && pImg.complete){                     // 封面铺底
+    const s = Math.min(pImg.width, pImg.height);
+    g.drawImage(pImg, (pImg.width-s)/2, (pImg.height-s)/2, s, s, 0, 0, W, W);
+  }
+  const tr = TRACKS[idx] || TRACKS[0];
+  g.fillStyle = 'rgba(10,4,16,.72)'; g.fillRect(0, H-118, W, 118);
+  g.textAlign = 'center';
+  g.fillStyle = '#fff'; g.font = 'bold 34px sans-serif';
+  const name = tr.t.length > 11 ? tr.t.slice(0,11)+'…' : tr.t;
+  g.fillText(name, W/2, H-72);
+  g.fillStyle = 'rgba(255,247,255,.6)'; g.font = '26px sans-serif';
+  g.fillText(tr.a + (player.paused ? ' · 已暂停' : ' · 播放中'), W/2, H-32);
+}
+async function togglePiP(){
+  if(!('requestPictureInPicture' in HTMLVideoElement.prototype)){
+    $('#tip').textContent = '这台手机的浏览器不支持悬浮小窗'; return;
+  }
+  if(document.pictureInPictureElement){ try{ await document.exitPictureInPicture(); }catch(e){} return; }
+  if(!pv){
+    pc = document.createElement('canvas'); pc.width = 480; pc.height = 480;
+    pImg = new Image(); pImg.src = './cover.jpg';
+    pv = document.createElement('video'); pv.muted = true; pv.playsInline = true;
+    pv.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px';
+    document.body.appendChild(pv);
+    pv.srcObject = pc.captureStream(4);
+    await pv.play().catch(()=>{});
+  }
+  paintPiP();
+  clearInterval(pTimer); pTimer = setInterval(paintPiP, 1000);   // 切歌/暂停时画面跟着变
+  try{ await pv.requestPictureInPicture(); }catch(e){ $('#tip').textContent = '进小窗失败，可能被系统拦了'; }
+}
+$('#pipBtn').onclick = togglePiP;
+document.addEventListener('leavepictureinpicture', ()=>{ clearInterval(pTimer); }, true);
+
 /* ── 播放模式面板（2026-09-18 毛毛要求）──
    原来点模式按钮只能「循环盲切」四种模式，看不出有哪几种、也看不出当前是哪个；
    现在改成点一下弹出菜单，四种模式直接选。 */
