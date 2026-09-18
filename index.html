@@ -273,7 +273,7 @@ const TRACKS = [
 
 const $ = s => document.querySelector(s);
 const player=$('#player'), bg=$('#bg');
-let db=null, idx=-1, ticket=null, sigs={}, expAt=0, hls=null;
+let db=null, idx=-1, ticket=null, sigs={}, sigsTicket=null, expAt=0, hls=null, curSong=null;
 let switching=false, wantPlay=true, pendingSeek=null;   // 切歌中 / 本次加载后是否自动播 / 待恢复的进度
 const SKEY='mg-state';                                  // 播放状态存档键（刷新后回到原处）
 const urls={}; let dragging=false;
@@ -341,20 +341,25 @@ async function cacheSong(i){
   const song=TRACKS[i].n, tip=$('#tip'), nth=TRACKS.findIndex(t=>t.n===song)+1;
   if(!await ensureTicket()){ tip.textContent='连不上服务器，等有网了再点'; return; }
   try{
-    const url=API+'/hls/'+song+'/index.m3u8?t='+encodeURIComponent(ticket)+'&s='+encodeURIComponent(sigs[song]||'');
+    const url = await mediaUrl(song, 'index.m3u8');
+    if(!url){ tip.textContent='连不上服务器，等有网了再点'; return; }
     const txt=await (await fetch(url)).text();
     if(!txt.startsWith('#EXTM3U')){ tip.textContent='取索引失败，稍后再点一次'; return; }
-    const segs=txt.split('\n').map(x=>x.trim()).filter(x=>x && !x.startsWith('#') && segKeyOf(x));
+    // 只取分片「名字」，地址每片现拼（因为票每 2 分钟就换一次，存死会失效）
+    const segs=txt.split('\n').map(x=>x.trim()).filter(x=>x && !x.startsWith('#'))
+                 .map(x=>{ const m=/\/hls\/\d\d\/([^?]+)/.exec(x); return m?m[1]:null; }).filter(Boolean);
     await dbPut('m3u8/'+song, txt);                       // 索引留着，断网时靠它起播
     let done=0, bad=0;
     const queue=segs.slice();
-    const one=async u=>{
-      const k=segKeyOf(u);
+    const one=async name=>{
+      const k='seg/'+song+'/'+name;
       try{
         if(!await dbGet(k)){                              // 已存过的跳过 → 天然支持续传
           let ok=false;
           for(let t=0; t<3 && !ok; t++){                  // 每片最多试 3 次
             try{
+              const u = await mediaUrl(song, name);       // ★ 每片现拼地址（票轮换也不怕）
+              if(!u) break;
               const r=await fetch(u);
               if(r.ok){ await dbPut(k, await encBuf(await r.arrayBuffer())); ok=true; }
             }catch(err){}
@@ -375,11 +380,41 @@ async function cacheSong(i){
 }
 
 /* ── 票据 ── */
+// 取票：★ 现在票只发票（2 分钟有效），页面会自动续，正常听歌完全无感
 async function ensureTicket(){
   if(ticket && Date.now()<expAt) return true;
-  try{ const r=await fetch(API+'/api/ticket'); if(!r.ok) return false;
-       const j=await r.json(); ticket=j.ticket; sigs=j.sigs||{}; expAt=Date.now()+(j.ttl-120)*1000; return true;
+  try{
+    const r = await fetch(API+'/api/ticket');
+    if(!r.ok) return false;
+    const j = await r.json();
+    ticket = j.ticket;
+    expAt  = Date.now() + (j.ttl - 20) * 1000;   // 提前 20 秒续票
+    sigs = {}; sigsTicket = null;                // 换了票，旧签名一律作废
+    return true;
   }catch(e){ return false; }
+}
+
+// 取「某一首」的签名（签名 6 分钟有效，够播完一首；按首单独领，不再一次给十首）
+async function ensureSig(song){
+  if(!await ensureTicket()) return null;
+  if(sigsTicket !== ticket){ sigs = {}; sigsTicket = ticket; }
+  const hit = sigs[song];
+  if(hit && hit.exp > Date.now() + 15000) return hit.v;      // 还剩 15 秒以上就复用
+  try{
+    const r = await fetch(API + '/api/sig?song=' + song + '&t=' + encodeURIComponent(ticket));
+    if(!r.ok) return null;
+    const j = await r.json();
+    const exp = Number(String(j.sig).split('.')[0]) || 0;
+    sigs[song] = { v: j.sig, exp };
+    return j.sig;
+  }catch(e){ return null; }
+}
+
+// 现拼一个带票和签名的地址（票会轮换，所以不能把地址存死）
+async function mediaUrl(song, path){
+  const s = await ensureSig(song);
+  if(!s) return null;
+  return API + '/hls/' + song + '/' + path + '?t=' + encodeURIComponent(ticket) + '&s=' + encodeURIComponent(s);
 }
 
 /* ── 渲染当前曲目信息 ── */
@@ -435,7 +470,14 @@ function initHls(){
   hls.on(Hls.Events.ERROR, (ev, data)=>{
     if(!data || !data.fatal) return;
     switching = false;
-    if(data.type === Hls.ErrorTypes.NETWORK_ERROR){ $('#tip').textContent='网络不稳，正在重连…'; hls.startLoad(); }
+    if(data.type === Hls.ErrorTypes.NETWORK_ERROR){
+      $('#tip').textContent='网络不稳，正在重连…';
+      // 很可能是票/签名到期了 —— 换一份新的再重试，而不是死等
+      (async()=>{
+        const u = await mediaUrl(curSong || TRACKS[Math.max(idx,0)].n, 'index.m3u8');
+        if(u) hls.loadSource(u); else hls.startLoad();
+      })();
+    }
     else if(data.type === Hls.ErrorTypes.MEDIA_ERROR){ hls.recoverMediaError(); }
     else { $('#tip').textContent='这一首暂时放不出来，换一首试试'; }
   });
@@ -530,8 +572,10 @@ async function playIdx(i, autoplay=true, seekTo=null){
   }catch(e){}
 
   // ② 在线：走 Worker 加密分片
-  if(navigator.onLine && await ensureTicket()){
-    const url = API+'/hls/'+song+'/index.m3u8?t='+encodeURIComponent(ticket)+'&s='+encodeURIComponent(sigs[song]||'');
+  curSong = song;
+  if(navigator.onLine){
+    const url = await mediaUrl(song, 'index.m3u8');
+    if(!url){ $('#tip').textContent='⚠️ 现在连不上服务器，等有网了再点一下播放'; return; }
     if(window.Hls && Hls.isSupported()){
       wantPlay = autoplay; switching = true;
       if(!hls) initHls();
