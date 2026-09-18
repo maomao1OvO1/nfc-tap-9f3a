@@ -585,7 +585,9 @@ function waveDraw(){
     const a = Math.floor(Math.pow(i/N, 1.25) * bins * 0.72);
     const b = Math.max(a+1, Math.floor(Math.pow((i+1)/N, 1.25) * bins * 0.72));
     let m = 0; for(let j=a;j<b && j<bins;j++) m = Math.max(m, WAVE.data[j]);
-    const target = m / 255;
+    // ★ 两端渐隐：正弦窗，越靠左右边缘越收 —— 免得声浪被垂直切一刀（毛毛说太生硬）
+    const w = Math.sin(Math.PI * i / (N - 1));   // 两端 0，正中间 1（不衰减）
+    const target = (m / 255) * w;
     // ★ 上升要快、下降要慢 —— 这就是"关闭音乐后缓慢降落"的关键
     if(target >= WAVE.pts[i]) WAVE.pts[i] = target;
     else WAVE.pts[i] += (target - WAVE.pts[i]) * 0.055;      // 0.055 ≈ 一秒左右落回
@@ -600,7 +602,7 @@ function waveDraw(){
   grad.addColorStop(1,   'rgba(92,225,255,.85)');   // 青
   g.beginPath();
   g.moveTo(0, base);                                      // 左下角起步
-  g.lineTo(0, base - WAVE.pts[0]*amp);
+  g.lineTo(0, base - WAVE.pts[0]*amp);                    // 两端已渐隐为 0，这条线自然收没了
   for(let i=1;i<N;i++){                                   // 只走上边缘这一条线
     const x = i/(N-1)*W, y = base - WAVE.pts[i]*amp;
     const px = (i-1)/(N-1)*W, py = base - WAVE.pts[i-1]*amp;
@@ -615,6 +617,8 @@ function waveDraw(){
   g.shadowBlur = 0;
   g.strokeStyle = 'rgba(255,255,255,.32)';   // 上边缘的高光
   g.lineWidth = 1;
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
   g.stroke();
   g.beginPath();                              // 底部一条细亮线，和进度条咬合
   g.moveTo(0, base - 0.5); g.lineTo(W, base - 0.5);
