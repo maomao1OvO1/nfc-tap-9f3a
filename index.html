@@ -103,6 +103,23 @@
   .row .eq i{width:2.5px;background:var(--pink);border-radius:2px;animation:eq .9s ease-in-out infinite}
   .row .eq i:nth-child(2){animation-delay:.15s}.row .eq i:nth-child(3){animation-delay:.3s}
   @keyframes eq{0%,100%{height:4px}50%{height:13px}}
+  /* 播放模式面板（2026-09-18 毛毛要求：随机 / 顺序 / 单曲要一眼能选到，不再只能循环盲切） */
+  .modepanel{position:fixed;left:0;right:0;bottom:0;z-index:6;
+     background:rgba(24,10,40,.96);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);
+     border-top-left-radius:24px;border-top-right-radius:24px;
+     border-top:1px solid rgba(255,255,255,.14);padding:16px 18px 30px;
+     transform:translateY(102%);transition:transform .3s cubic-bezier(.22,1,.36,1)}
+  .modepanel.open{transform:translateY(0)}
+  .modepanel h3{margin:4px 0 12px;font-size:15px;letter-spacing:1px;color:var(--dim);font-weight:600}
+  .mrow{display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;
+     margin-bottom:8px;font-size:14.5px;background:rgba(255,255,255,.06);
+     border:1px solid rgba(255,255,255,.09)}
+  .mrow:active{background:rgba(255,255,255,.14)}
+  .mrow .mk{font-size:17px;width:24px;text-align:center}
+  .mrow .mck{margin-left:auto;color:var(--pink);font-weight:800;opacity:0;transition:opacity .2s}
+  .mrow.on{background:linear-gradient(90deg,rgba(255,95,162,.24),rgba(160,107,255,.12));
+     border-color:rgba(255,95,162,.4)}
+  .mrow.on .mck{opacity:1}
   .mask{position:fixed;inset:0;z-index:4;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;
         transition:opacity .3s}
   .mask.on{opacity:1;pointer-events:auto}
@@ -167,6 +184,16 @@
   <h3>播放列表 · 10 首</h3>
   <div id="rows"></div>
 </div>
+
+<!-- 播放模式选择面板（点模式按钮或底部「模式」标签弹出） -->
+<div class="modepanel" id="modePanel">
+  <h3>播放模式</h3>
+  <div class="mrow" data-m="order"><span class="mk">➡️</span>顺序播放<span class="mck">✓</span></div>
+  <div class="mrow" data-m="all"><span class="mk">🔁</span>列表循环<span class="mck">✓</span></div>
+  <div class="mrow" data-m="one"><span class="mk">🔂</span>单曲循环<span class="mck">✓</span></div>
+  <div class="mrow" data-m="shuffle"><span class="mk">🔀</span>随机播放<span class="mck">✓</span></div>
+</div>
+
 <audio id="player" preload="metadata" playsinline></audio>
 
 <!-- HLS 播放核心：改用同源本地文件（原来走 jsdelivr CDN，413 KB 实测要 10 秒才能下完；
@@ -311,13 +338,25 @@ bar.addEventListener('pointercancel', endSeek);
 const MODES=['all','one','shuffle','order'];
 const MODE_TXT={order:'➡️ 顺序播放',all:'🔁 列表循环',one:'🔂 单曲循环',shuffle:'🔀 随机播放'};
 let mode=localStorage.getItem('mg-mode')||'all'; if(!MODES.includes(mode)) mode='all';
-const applyMode=()=>{ const s=MODE_TXT[mode]; $('#modeChip').textContent=s; localStorage.setItem('mg-mode',mode); };
+const applyMode=()=>{ $('#modeChip').textContent=MODE_TXT[mode]; localStorage.setItem('mg-mode',mode);
+  // 面板里把当前模式点亮（打开面板就知道现在是哪个）
+  document.querySelectorAll('#modePanel .mrow').forEach(r=>r.classList.toggle('on', r.dataset.m===mode)); };
 function nextIdx(){
   if(mode==='one') return idx;
   if(mode==='shuffle'){ if(TRACKS.length<2) return idx; let n; do{n=Math.floor(Math.random()*TRACKS.length);}while(n===idx); return n; }
   const nx=idx+1; if(nx<TRACKS.length) return nx; return mode==='all'?0:-1;
 }
-$('#modeBtn').onclick = $('#modeChip').onclick = ()=>{ mode=MODES[(MODES.indexOf(mode)+1)%MODES.length]; applyMode(); };
+/* ── 播放模式面板（2026-09-18 毛毛要求）──
+   原来点模式按钮只能「循环盲切」四种模式，看不出有哪几种、也看不出当前是哪个；
+   现在改成点一下弹出菜单，四种模式直接选。 */
+const modePanel=$('#modePanel');
+const openMode=o=>{ if(o) sheet.classList.remove('open');
+  modePanel.classList.toggle('open',o);
+  mask.classList.toggle('on', o || sheet.classList.contains('open')); };
+$('#modeBtn').onclick = $('#modeChip').onclick = ()=>openMode(true);
+modePanel.querySelectorAll('.mrow').forEach(r=>{
+  r.onclick = ()=>{ mode = r.dataset.m; applyMode(); openMode(false); };
+});
 
 /* ── 按钮 ── */
 $('#play').onclick = ()=>{ if(idx<0){ playIdx(0); return; }
@@ -327,9 +366,11 @@ $('#prev').onclick = ()=>{ const p = idx<=0 ? TRACKS.length-1 : idx-1; playIdx(p
 
 /* ── 列表抽屉 ── */
 const sheet=$('#sheet'), mask=$('#mask');
-const openSheet=o=>{ sheet.classList.toggle('open',o); mask.classList.toggle('on',o); };
+const openSheet=o=>{ if(o) modePanel.classList.remove('open');
+  sheet.classList.toggle('open',o);
+  mask.classList.toggle('on', o || modePanel.classList.contains('open')); };
 $('#listBtn').onclick = ()=>openSheet(true);
-mask.onclick = ()=>openSheet(false);
+mask.onclick = ()=>{ openSheet(false); openMode(false); };
 
 /* ── 列表渲染 ── */
 async function renderRows(){
