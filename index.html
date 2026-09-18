@@ -135,8 +135,11 @@
      封面固定在左侧一列，歌名/进度/按钮/徽章全部排到右边。
      不然在桌面视口下会变成中间一条窄缝、两边全空。 */
   @media (min-width: 820px){
-    .wrap{max-width:900px;display:flex;flex-wrap:wrap;align-content:flex-start;
-          column-gap:46px;padding:36px 44px 48px}
+    /* 关键：必须把默认的 flex-direction:column 覆盖成 row，
+       否则下面的「左封面 + 右信息」会继续竖着堆，按钮也会被挤成竖排 */
+    .wrap{max-width:900px;display:flex;flex-direction:row;flex-wrap:wrap;
+          align-content:flex-start;align-items:flex-start;column-gap:46px;
+          padding:36px 44px 48px;min-height:0}
     .top{flex:0 0 100%}
     .cover{flex:0 0 300px;width:300px;max-width:300px;margin:8px 0 0}
     .meta,.prog,.ctrl,.foot,.hint,.src{flex:1 1 calc(100% - 346px);min-width:0}
@@ -144,8 +147,8 @@
     .song{font-size:30px}
     .artist{font-size:15px}
     .album{font-size:12px}
-    .ctrl{justify-content:flex-start;gap:24px}
-    .foot{justify-content:flex-start}
+    .ctrl{justify-content:flex-start;gap:24px;flex-wrap:wrap}
+    .foot{justify-content:flex-start;flex-wrap:wrap;margin-top:0}
     .foot .chip{flex:0 0 auto;padding:11px 22px}
     .hint{text-align:left}
     .src{align-items:flex-start;margin:20px 0 0}
