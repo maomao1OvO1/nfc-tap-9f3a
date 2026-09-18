@@ -57,7 +57,9 @@
   /* 进度条 */
   .prog{margin:6px 0 20px}
   /* 声浪：贴在进度条上方的一条连续起伏线（不是一根根柱子） */
-  .wave{display:block;width:100%;height:46px;margin:0 0 6px;opacity:.92}
+  /* 声浪紧贴进度条上沿：下边距给 0，靠文档流自然相接 ——
+     注意不能用负边距去“压”，那会盖住进度条的触摸区，进度条就拖不动了 */
+  .wave{display:block;width:100%;height:46px;margin:0;opacity:.92}
   .bar{position:relative;height:34px;display:flex;align-items:center;cursor:pointer;touch-action:none}
   .bar .track{position:absolute;left:0;right:0;height:5px;border-radius:99px;
       background:rgba(255,255,255,.16);overflow:hidden}
