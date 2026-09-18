@@ -37,14 +37,22 @@
   .dot.off{background:#ff8a3d;box-shadow:0 0 8px #ff8a3d}
 
   /* 封面 */
-  .cover{position:relative;margin:6px auto 20px;width:100%;aspect-ratio:1/1;max-width:340px;
-         border-radius:22px;overflow:hidden;
-         box-shadow:0 26px 60px -18px rgba(255,95,162,.55), 0 8px 26px rgba(0,0,0,.5)}
-  .cover img{width:100%;height:100%;object-fit:cover;display:block}
-  .cover.spin img{animation:sp 18s linear infinite}
+  /* 唱片：圆形 + 中心孔 + 外圈纹路，播放时整张圆盘旋转 */
+  .cover{position:relative;margin:10px auto 22px;width:74vw;max-width:290px;aspect-ratio:1/1;
+         border-radius:50%;overflow:hidden;
+         box-shadow:0 26px 60px -16px rgba(255,95,162,.6), 0 10px 30px rgba(0,0,0,.55),
+                    inset 0 0 0 1px rgba(255,255,255,.14)}
+  .cover::before{content:'';position:absolute;inset:0;border-radius:50%;z-index:3;pointer-events:none;
+     background:repeating-radial-gradient(circle at 50% 50%,
+        rgba(255,255,255,.05) 0 1.5px, rgba(255,255,255,0) 1.5px 5px)}   /* 黑胶纹路 */
+  .cover::after{content:'';position:absolute;left:50%;top:50%;width:26%;height:26%;
+     transform:translate(-50%,-50%);border-radius:50%;z-index:4;pointer-events:none;
+     background:radial-gradient(circle,#12071f 0 34%, #f6e6ff 36% 44%, #12071f 46% 100%);
+     box-shadow:0 0 14px rgba(0,0,0,.6)}                                /* 中心孔 */
+  .cover img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%}
+  .cover .disc{width:100%;height:100%;border-radius:50%;overflow:hidden}
+  .cover.spin .disc{animation:sp 20s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
-  .cover::after{content:'';position:absolute;inset:0;
-     background:linear-gradient(140deg,rgba(255,255,255,.16),transparent 42%)}
 
   /* 歌名 */
   .meta{text-align:center;margin-bottom:18px}
@@ -55,7 +63,7 @@
 
   /* 进度条 */
   .prog{margin:6px 0 20px}
-  .bar{position:relative;height:22px;display:flex;align-items:center;cursor:pointer}
+  .bar{position:relative;height:34px;display:flex;align-items:center;cursor:pointer;touch-action:none}
   .bar .track{position:absolute;left:0;right:0;height:5px;border-radius:99px;
       background:rgba(255,255,255,.16);overflow:hidden}
   .bar .fill{height:100%;width:0%;
@@ -121,7 +129,7 @@
     <div class="t2"><span class="dot" id="net"></span><span id="netTxt">在线</span></div>
   </div>
 
-  <div class="cover" id="cover"><img src="./cover.jpg" alt="cover"></div>
+  <div class="cover" id="cover"><div class="disc"><img src="./cover.jpg" alt="cover"></div></div>
 
   <div class="meta">
     <div class="song" id="song">见习恶魔</div>
@@ -157,7 +165,7 @@
 
   <div class="foot">
     <button class="chip" id="modeChip">🔁 列表循环</button>
-    <button class="chip" id="saveChip">⬇ 存到手机</button>
+    <button class="chip" id="listChip">☰ 播放列表</button>
   </div>
   <p class="hint" id="tip">贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首</p>
 </div>
@@ -166,7 +174,7 @@
 <div class="sheet" id="sheet">
   <h3>播放列表 · 10 首</h3>
   <div id="rows"></div>
-  <button class="cta" id="saveBtn2">⬇ 把音乐存到手机（断网也能听 · 只用做一次）</button>
+  <button class="cta" id="saveBtn2">离线缓存（自己用 · 断网时播这份）</button>
   <input id="picker" type="file" accept="audio/*" multiple hidden>
 </div>
 <audio id="player" preload="metadata" playsinline></audio>
@@ -261,17 +269,34 @@ player.addEventListener('play', ()=>{ $('#playIcon').innerHTML='<path d="M7 5h4v
 player.addEventListener('pause',()=>{ $('#playIcon').innerHTML='<path d="M7 5v14l12-7z"/>';
   $('#cover').classList.remove('spin'); });
 
-/* 拖动进度 */
+/* 拖动进度：拖动过程只更新界面（不 seek，避免卡），松手那一刻才真正跳 */
 const bar=$('#bar');
-const seekAt=e=>{ const r=bar.getBoundingClientRect();
-  const x=(e.touches?e.touches[0].clientX:e.clientX)-r.left;
-  const p=Math.max(0,Math.min(1,x/r.width));
-  if(isFinite(player.duration)) { player.currentTime = p*player.duration;
-    $('#fill').style.width=p*100+'%'; $('#knob').style.left=p*100+'%'; $('#cur').textContent=fmt(p*player.duration); } };
-bar.addEventListener('pointerdown', e=>{ dragging=true; bar.classList.add('active'); bar.setPointerCapture(e.pointerId); seekAt(e); });
-bar.addEventListener('pointermove', e=>{ if(dragging) seekAt(e); });
-bar.addEventListener('pointerup',   e=>{ dragging=false; bar.classList.remove('active'); });
-bar.addEventListener('pointercancel',()=>{ dragging=false; bar.classList.remove('active'); });
+let pendingRatio = 0;
+const ratioOf = e => { const r=bar.getBoundingClientRect();
+  const cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+  return Math.max(0, Math.min(1, (cx - r.left) / r.width)); };
+function paintBar(p){
+  $('#fill').style.width = (p*100)+'%';
+  $('#knob').style.left  = (p*100)+'%';
+  if(isFinite(player.duration) && player.duration>0) $('#cur').textContent = fmt(p*player.duration);
+}
+bar.addEventListener('pointerdown', e=>{
+  dragging = true; bar.classList.add('active');
+  try{ bar.setPointerCapture(e.pointerId); }catch(_){}
+  pendingRatio = ratioOf(e); paintBar(pendingRatio); e.preventDefault();
+});
+bar.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  pendingRatio = ratioOf(e); paintBar(pendingRatio); e.preventDefault();
+});
+const endSeek = () => {
+  if(!dragging) return;
+  dragging = false; bar.classList.remove('active');
+  if(isFinite(player.duration) && player.duration>0){ player.currentTime = pendingRatio * player.duration; }
+  tickUI();
+};
+bar.addEventListener('pointerup', endSeek);
+bar.addEventListener('pointercancel', endSeek);
 
 /* ── 四种模式 ── */
 const MODES=['all','one','shuffle','order'];
@@ -317,7 +342,8 @@ async function renderRows(){
 /* ── 存到手机（离线用）── */
 const picker=$('#picker');
 const doPick=()=>picker.click();
-$('#saveChip').onclick = $('#saveBtn2').onclick = doPick;
+$('#listChip').onclick = ()=>openSheet(true);
+$('#saveBtn2').onclick = doPick;
 picker.addEventListener('change', async e=>{
   const fs=[...e.target.files];
   $('#tip').textContent='正在存到手机…（'+fs.length+' 个）';
