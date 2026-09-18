@@ -56,6 +56,9 @@
 
   /* 进度条 */
   .prog{margin:6px 0 20px}
+  /* 声浪：贴在进度条上方的一条连续起伏线（不是一根根柱子） */
+  .wave{display:block;width:100%;height:54px;margin:0 0 2px;
+        border-radius:10px;opacity:.9}
   .bar{position:relative;height:34px;display:flex;align-items:center;cursor:pointer;touch-action:none}
   .bar .track{position:absolute;left:0;right:0;height:5px;border-radius:99px;
       background:rgba(255,255,255,.16);overflow:hidden}
@@ -187,6 +190,8 @@
       <div class="track"><div class="fill" id="fill"></div></div>
       <div class="knob" id="knob"></div>
     </div>
+    <!-- 声浪（跟着音乐实时起伏的连续曲线 · 2026-09-18 毛毛要的） -->
+    <canvas class="wave" id="wave"></canvas>
     <div class="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
   </div>
 
@@ -530,6 +535,98 @@ async function playIdx(i, autoplay=true, seekTo=null){
   else { $('#tip').textContent='⚠️ 现在连不上服务器，等有网了再点一下播放'; }
 }
 
+/* ══════ 声浪可视化（2026-09-18 毛毛要求）══════
+   · 跟着音乐实时起伏 —— 用 Web Audio 的 AnalyserNode 读真实声音
+   · 暂停/停止时【缓慢降落】到零，不是一下子归零（衰减系数调小就慢）
+   · 画的是连续曲线（上下对称的声浪），不是一根根柱子
+   · 万一浏览器不支持或出错，就静静地不显示，绝不影响放音           */
+const WAVE = { ctx:null, an:null, src:null, data:null, pts:null, raf:0, cv:null, N:72, dead:false };
+function waveInit(){
+  if(WAVE.an || WAVE.dead) return !!WAVE.an;
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) { WAVE.dead = true; return false; }
+    WAVE.ctx = new AC();
+    WAVE.src = WAVE.ctx.createMediaElementSource(player);   // ★ 一个 audio 只能接一次
+    WAVE.an  = WAVE.ctx.createAnalyser();
+    WAVE.an.fftSize = 512;
+    WAVE.an.smoothingTimeConstant = 0.8;
+    WAVE.src.connect(WAVE.an);
+    WAVE.an.connect(WAVE.ctx.destination);                  // 别把声音断了
+    WAVE.data = new Uint8Array(WAVE.an.frequencyBinCount);
+    WAVE.pts  = new Float32Array(WAVE.N);
+    WAVE.cv   = $('#wave');
+    return true;
+  }catch(e){
+    WAVE.dead = true;                                        // 出错就彻底放弃，保证有声音
+    try{ if(WAVE.cv) WAVE.cv.style.display = 'none'; }catch(e2){}
+    return false;
+  }
+}
+function waveDraw(){
+  const cv = WAVE.cv; if(!cv) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if(cv.width !== W*dpr || cv.height !== H*dpr){ cv.width = W*dpr; cv.height = H*dpr; }
+  const g = cv.getContext('2d');
+  g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,W,H);
+
+  WAVE.an.getByteFrequencyData(WAVE.data);
+  const bins = WAVE.data.length, N = WAVE.N;
+  let alive = 0;
+  for(let i=0;i<N;i++){
+    // 低频给多一点权重（声音的"厚度"主要在这儿），并取区间峰值
+    const a = Math.floor(Math.pow(i/N, 1.25) * bins * 0.72);
+    const b = Math.max(a+1, Math.floor(Math.pow((i+1)/N, 1.25) * bins * 0.72));
+    let m = 0; for(let j=a;j<b && j<bins;j++) m = Math.max(m, WAVE.data[j]);
+    const target = m / 255;
+    // ★ 上升要快、下降要慢 —— 这就是"关闭音乐后缓慢降落"的关键
+    if(target >= WAVE.pts[i]) WAVE.pts[i] = target;
+    else WAVE.pts[i] += (target - WAVE.pts[i]) * 0.055;      // 0.055 ≈ 一秒左右落回
+    if(WAVE.pts[i] > 0.004) alive++;
+  }
+
+  // 画：上下对称的连续曲线（中间一条轴，两侧起伏）
+  const mid = H/2, amp = H*0.46;
+  const grad = g.createLinearGradient(0,0,W,0);
+  grad.addColorStop(0,   'rgba(255,95,162,.85)');   // 粉
+  grad.addColorStop(0.5, 'rgba(160,107,255,.85)');  // 紫
+  grad.addColorStop(1,   'rgba(92,225,255,.85)');   // 青
+  g.beginPath();
+  g.moveTo(0, mid - WAVE.pts[0]*amp);
+  for(let i=1;i<N;i++){                                   // 上半
+    const x = i/(N-1)*W, y = mid - WAVE.pts[i]*amp;
+    const px = (i-1)/(N-1)*W, py = mid - WAVE.pts[i-1]*amp;
+    g.quadraticCurveTo((px+x)/2, (py+y)/2, x, y);          // 二次曲线 → 连续不生硬
+  }
+  for(let i=N-1;i>=0;i--){                                // 下半（镜像）
+    const x = i/(N-1)*W, y = mid + WAVE.pts[i]*amp;
+    const nx = Math.min(i+1,N-1)/(N-1)*W, ny = mid + WAVE.pts[Math.min(i+1,N-1)]*amp;
+    g.quadraticCurveTo((nx+x)/2, (ny+y)/2, x, y);
+  }
+  g.closePath();
+  g.fillStyle = grad;
+  g.shadowColor = 'rgba(255,95,162,.5)';
+  g.shadowBlur = 12;
+  g.fill();
+  g.shadowBlur = 0;
+  g.strokeStyle = 'rgba(255,255,255,.28)';
+  g.lineWidth = 1;
+  g.stroke();
+
+  // 全部落回零 → 停掉循环省电（下次播放会自动重启）
+  if(alive === 0 && player.paused){ WAVE.raf = 0; return; }
+  WAVE.raf = requestAnimationFrame(waveDraw);
+}
+function waveStart(){
+  if(WAVE.dead) return;
+  if(!waveInit()) return;
+  try{ if(WAVE.ctx.state === 'suspended') WAVE.ctx.resume(); }catch(e){}
+  if(!WAVE.raf) WAVE.raf = requestAnimationFrame(waveDraw);
+}
+window.addEventListener('resize', ()=>{ if(WAVE.cv) WAVE.cv.width = 0; });
+
 /* ── 进度条 ── */
 const fmt=s=>{ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60), x=Math.floor(s%60);
   return m+':'+String(x).padStart(2,'0'); };
@@ -550,7 +647,7 @@ player.addEventListener('loadedmetadata', ()=>{
   if(pendingSeek!=null){ try{ player.currentTime = pendingSeek; }catch(e){} pendingSeek=null; }
 });
 player.addEventListener('play', ()=>{ $('#playIcon').innerHTML='<path d="M7 5h4v14H7zm6 0h4v14h-4z"/>';
-  $('#cover').classList.add('playing'); mediaMeta(); mediaState('playing'); saveState(); });
+  $('#cover').classList.add('playing'); mediaMeta(); mediaState('playing'); saveState(); waveStart(); });
 player.addEventListener('pause',()=>{ $('#playIcon').innerHTML='<path d="M7 5v14l12-7z"/>';
   $('#cover').classList.remove('playing');
   if(!switching){ mediaMeta(); mediaState('paused'); }   // 切歌中的 pause 不算数，免得系统卡片闪
