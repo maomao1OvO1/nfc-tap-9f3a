@@ -572,6 +572,8 @@ $('#listChip').onclick = ()=>openSheet(true);
   if(st && Number.isInteger(st.i) && st.i>=0 && st.i<TRACKS.length){
     idx = st.i; paint();
     playIdx(st.i, !!st.p, (st.t && st.t>5) ? st.t : null);
+    // 浏览器有时不允许网页自动出声 —— 那就明说点哪儿接着听，别让人以为「没恢复到」
+    if(st.p) setTimeout(()=>{ if(player.paused) $('#tip').textContent='接着上次：点 ▶ 继续播放（'+fmt(st.t||0)+'）'; }, 1600);
   }
 })();
 </script>
