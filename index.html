@@ -638,7 +638,9 @@ function mediaMeta(){
   const tr = TRACKS[idx] || TRACKS[0];
   try{
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: tr.t, artist: tr.a, album: 'Mutown Grooove',
+      title: tr.t,
+      artist: (tr.v || tr.r || ''),                                   // 歌手（锁屏/通知栏显示这个）
+      album: (tr.r ? tr.r + ' · ' : '') + 'Mutown Grooove',           // 角色 · 专辑
       artwork: [{ src:'./cover.jpg', sizes:'512x512', type:'image/jpeg' }]
     });
   }catch(e){}
