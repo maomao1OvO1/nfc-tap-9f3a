@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="250px" height="80px" viewBox="0 0 250 81" version="1.1">
+    <g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+
+            <g transform="translate(0, 0)">
+                <rect stroke="#ff6127" fill="#ff6127" x="0.5" y="0.5" width="249" height="79" rx="3"/>
+                <text font-family="Helvetica-Bold, Helvetica" font-size="10" font-weight="bold" fill="#FFFFFF">
+                    <tspan x="10" y="18">去dizzylab获取</tspan>
+                </text>
+                <text font-family="Helvetica-Bold, Helvetica" font-size="14.5" font-weight="bold" fill="#FFFFFF">
+                    <tspan x="10" y="40">Mutown Grooove</tspan>
+                </text>
+                <!--<g xmlns="http://www.w3.org/2000/svg" transform="translate(10, 55)">
+                    <image xlink:href="https://cdn.dizzylab.net/media/cover/dlcd06_3uk7ek2.jpg!labellittle" y="0" x="0" height="35" width="35" id="image0"/>
+                </g>-->
+
+                <g transform="translate(0, 50)">
+                    <rect stroke="#ff6127" fill="#FFFFFF" x="0.5" y="0.5" width="249" height="30" rx="3"/>
+                    <g transform="translate(10, 9) scale(0.6)" fill="#ff6127">
+                        <path d="M12 4.248c-3.148-5.402-12-3.825-12 2.944 0 4.661 5.571 9.427 12 15.808 6.43-6.381 12-11.147 12-15.808 0-6.792-8.875-8.306-12-2.944z"/> 
+                    </g>
+
+                    <g>
+                        <text font-family="Helvetica-Bold, Helvetica" font-size="12" fill="#ff6127">
+                            <tspan x="33" y="20">+734dB</tspan>
+                        </text>
+                    </g>
+                </g>
+
+            </g>
+
+    </g>
+</svg>
