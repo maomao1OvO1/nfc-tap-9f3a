@@ -281,18 +281,26 @@ async function cacheSong(i){
     const url=API+'/hls/'+song+'/index.m3u8?t='+encodeURIComponent(ticket)+'&s='+encodeURIComponent(sigs[song]||'');
     const txt=await (await fetch(url)).text();
     if(!txt.startsWith('#EXTM3U')){ tip.textContent='取索引失败，稍后再点一次'; return; }
-    const segs=txt.split('\n').map(s=>s.trim()).filter(s=>s && !s.startsWith('#'));
-    await dbPut('m3u8/'+song, txt);                                   // 索引也留着，断网时靠它起播
-    let n=0;
-    for(const u of segs){
-      const k=segKeyOf(u); if(!k) continue;
-      if(await dbGet(k)){ n++; continue; }                            // 已经有了就跳过
-      const r=await fetch(u); if(!r.ok) continue;
-      await dbPut(k, await encBuf(await r.arrayBuffer()));
-      n++; tip.textContent='正在存到手机… '+n+'/'+segs.length;
-    }
+    const segs=txt.split('\n').map(s=>s.trim()).filter(s=>s && !s.startsWith('#') && segKeyOf(s));
+    await dbPut('m3u8/'+song, txt);                       // 索引留着，断网时靠它起播
+    let done=0, bad=0;
+    const queue=segs.slice();
+    const one=async u=>{
+      const k=segKeyOf(u);
+      try{
+        if(!await dbGet(k)){                              // 已经存过的就跳过
+          const r=await fetch(u);
+          if(r.ok) await dbPut(k, await encBuf(await r.arrayBuffer()));
+          else bad++;
+        }
+      }catch(e){ bad++; }
+      done++; tip.textContent='正在存到手机… '+done+'/'+segs.length;
+    };
+    // 5 路并发：这边一片要走好几秒，串行下太慢（20 片串着下要 2 分钟，并发约 20 秒）
+    await Promise.all(Array.from({length:5}, async ()=>{ while(queue.length) await one(queue.shift()); }));
     await renderRows();
-    tip.textContent = n>=segs.length ? '✅ 这首已存在手机里（断网也能听）' : '存了 '+n+'/'+segs.length+' 片，网络不稳可以再点一次';
+    tip.textContent = bad===0 ? '✅ 这首已存在手机里（断网也能听）'
+                              : '存了 '+(segs.length-bad)+'/'+segs.length+' 片，网络不稳可以再点一次';
   }catch(e){ tip.textContent='存的时候出错了，稍后再点一次'; }
 }
 
