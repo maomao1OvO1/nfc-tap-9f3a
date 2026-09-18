@@ -388,6 +388,77 @@ function initHls(){
   });
 }
 
+/* ══════ 本地播放：不走 hls.js，自己拼给播放器 ══════
+   为什么：hls.js 是为「边下边播的网络流」设计的；歌已经存在手机里时它反而会卡
+   （实测飞行模式下切歌偶发没声）。本地这份干脆绕开它 —— 解密后的分片依次塞进
+   MediaSource，播放器直接播。少一层中间商，少一处出错。
+   全程零网络请求，所以断网时和联网时表现一模一样。 */
+let localToken = null;                       // 用来取消上一次还没拼完的任务
+
+async function playLocal(song, autoplay, seekTo){
+  const m3u8 = await dbGet('m3u8/' + song);
+  if(!m3u8) return false;
+  const segs = String(m3u8).split('\n').map(s=>s.trim()).filter(s=>s && !s.startsWith('#') && segKeyOf(s));
+  if(!segs.length) return false;
+
+  if(localToken) localToken.aborted = true;   // 上一次还在拼？让它停
+  const token = { aborted:false }; localToken = token;
+
+  // ① 跟 hls.js 彻底分开，免得两边抢同一个 <audio>
+  if(hls){ try{ hls.stopLoad(); hls.detachMedia(); hls.destroy(); }catch(e){} hls = null; }
+  // ② 关键：把上一个音频源整个清掉。不清的话新 MediaSource 挂不上去
+  //    （实测症状：切歌后 duration 一直是上一首的，等于没换源）
+  try{ player.pause(); }catch(e){}
+  try{ player.removeAttribute('src'); player.load(); }catch(e){}
+
+  const ms = new MediaSource();
+  player.src = URL.createObjectURL(ms);
+  // ③ 给 sourceopen 加个保险：5 秒还不开就走网络，别在这儿死等
+  const opened = await Promise.race([
+    new Promise(res => ms.addEventListener('sourceopen', res, { once:true })),
+    new Promise(res => setTimeout(()=>res('__timeout'), 5000)),
+  ]);
+  if(opened === '__timeout' && ms.readyState !== 'open') return false;
+  if(token.aborted) return true;
+
+  // MPEG-TS（纯 AAC 音频）—— 这个 MIME 就是 hls.js 内部用的那个
+  let sb = null;
+  for(const mime of ['video/mp2t; codecs="mp4a.40.2"', 'video/mp2t', 'audio/mp2t']){
+    try{ sb = ms.addSourceBuffer(mime); break; }catch(e){}
+  }
+  if(!sb){ $('#tip').textContent = '这台手机的浏览器放不了本地格式，走网络吧'; try{ ms.endOfStream(); }catch(e){} return false; }
+
+  const waitDone = () => new Promise(res => sb.addEventListener('updateend', res, { once:true }));
+
+  for(let n=0; n<segs.length; n++){
+    if(token.aborted) return true;
+    const rec = await dbGet(segKeyOf(segs[n]));
+    if(!rec) continue;
+    let data;
+    try{ data = await decBuf(rec); }catch(e){ continue; }   // 解密在本地完成
+    if(sb.updating) await waitDone();
+    try{ sb.appendBuffer(data); }catch(e){ try{ await waitDone(); sb.appendBuffer(data); }catch(e2){} }
+    $('#tip').textContent = '正在从手机里读… ' + (n+1) + '/' + segs.length + ' 片';
+  }
+  if(token.aborted) return true;
+  if(sb.updating) await waitDone();
+  try{ ms.endOfStream(); }catch(e){}
+
+  // ★ 关键一步：TS 分片的起始时间戳通常不是 0（可能是 1.4s、10s…），
+  //   如果当前位置落在缓冲范围之外，播放器会卡在 readyState=1 不出声。
+  //   所以先跳到「缓冲真正开始的地方」。
+  try{
+    if(player.buffered.length){
+      const s0 = player.buffered.start(0);
+      if(player.currentTime < s0) player.currentTime = s0;
+    }
+  }catch(e){}
+
+  if(seekTo!=null){ try{ player.currentTime = seekTo; }catch(e){} }
+  if(autoplay) player.play().catch(()=>{});
+  return true;
+}
+
 async function playIdx(i, autoplay=true, seekTo=null){
   if(i<0||i>=TRACKS.length) return;
   idx=i; paint();
@@ -396,12 +467,12 @@ async function playIdx(i, autoplay=true, seekTo=null){
 
   // ① 手机里已经存过这首 → 直接用本地那份（断网能听，也不吃网络延迟）
   try{
-    const localM3U8 = await dbGet('m3u8/'+song);
-    if(localM3U8 && window.Hls && Hls.isSupported()){
-      wantPlay = autoplay; switching = true;
-      if(!hls) initHls();
-      hls.loadSource(URL.createObjectURL(new Blob([localM3U8], { type:'application/vnd.apple.mpegurl' })));
-      return;
+    // 手机里存过这首 → 本地直连（不走 hls.js）
+    if(await dbGet('m3u8/'+song)){
+      switching = true;
+      const ok = await playLocal(song, autoplay, seekTo);
+      switching = false;
+      if(ok) return;
     }
   }catch(e){}
 
