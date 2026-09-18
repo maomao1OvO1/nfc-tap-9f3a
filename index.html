@@ -36,16 +36,11 @@
   .dot{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
   .dot.off{background:#ff8a3d;box-shadow:0 0 8px #ff8a3d}
 
-  /* 封面 */
-  /* 唱片：圆形 + 中心孔（2026-09-18 毛毛说黑胶纹路很丑 → 已整条删除，只留凿出来的洞） */
+  /* 封面（2026-09-18 毛毛定稿：只要一张圆封面 —— 黑胶纹路不要、中心孔也不要；播放时整张圆盘慢慢转） */
   .cover{position:relative;margin:10px auto 22px;width:74vw;max-width:290px;aspect-ratio:1/1;
          border-radius:50%;overflow:hidden;
          box-shadow:0 26px 60px -16px rgba(255,95,162,.6), 0 10px 30px rgba(0,0,0,.55),
                     inset 0 0 0 1px rgba(255,255,255,.14)}
-  .cover::after{content:'';position:absolute;left:50%;top:50%;width:26%;height:26%;
-     transform:translate(-50%,-50%);border-radius:50%;z-index:4;pointer-events:none;
-     background:radial-gradient(circle,#12071f 0 34%, #f6e6ff 36% 44%, #12071f 46% 100%);
-     box-shadow:0 0 14px rgba(0,0,0,.6)}                                /* 中心孔 */
   .cover img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%}
   .cover .disc{width:100%;height:100%;border-radius:50%;overflow:hidden}
   .cover.spin .disc{animation:sp 20s linear infinite}
@@ -171,8 +166,6 @@
 <div class="sheet" id="sheet">
   <h3>播放列表 · 10 首</h3>
   <div id="rows"></div>
-  <button class="cta" id="saveBtn2">离线缓存（自己用 · 断网时播这份）</button>
-  <input id="picker" type="file" accept="audio/*" multiple hidden>
 </div>
 <audio id="player" preload="metadata" playsinline></audio>
 
@@ -182,14 +175,22 @@
 <script>
 const API = 'https://nfc-tap.maomao1ovo1.workers.dev';
 
+// 曲目表（2026-09-18 修正：切片当初是按「文件名字典序」扫的 —— 电脑排序是 1 → 10 → 2 → 3 …
+// 所以「切片编号 n」跟「专辑曲序」并不一致，必须逐首写死；之前按 i+1 硬推，第 2 首起名字全体错位一位。
+// 每首的对应关系是用 ffprobe 时长指纹逐首比对确认的，10/10 精确吻合）
 const TRACKS = [
-  {t:'见习恶魔', a:'Buro'},   {t:'糖果味觉', a:'Buro'},   {t:'假面日记', a:'Buro'},
-  {t:'暮色小诗', a:'Rin'},    {t:'你是我永不落空的期待', a:'Marija'}, {t:'Signal 信号', a:'Rin'},
-  {t:'恋爱巡航', a:'Buro'},   {t:'摩登时代的孤独', a:'Rin'}, {t:'漫漫长夜', a:'Marija'},
-  {t:'雨天诗集', a:'Marija'}
+  {n:'01', t:'见习恶魔',             a:'Buro'},     // 195.4s
+  {n:'03', t:'糖果味觉',             a:'Buro'},     // 240.5s
+  {n:'04', t:'假面日记',             a:'Buro'},     // 211.2s
+  {n:'05', t:'暮色小诗',             a:'Rin'},      // 190.0s
+  {n:'06', t:'你是我永不落空的期待',  a:'Marija'},   // 237.8s
+  {n:'07', t:'Signal 信号',          a:'Rin'},      // 216.8s
+  {n:'08', t:'恋爱巡航',             a:'Buro'},     // 210.0s
+  {n:'09', t:'摩登时代的孤独',        a:'Rin'},      // 213.4s
+  {n:'10', t:'漫漫长夜',             a:'Marija'},   // 250.4s
+  {n:'02', t:'雨天诗集',             a:'Marija'}    // 237.2s
 ];
-// 本地存的那份，键名用与在线一致的编号
-const KEY = i => String(i+1).padStart(2,'0');
+/* 说明：切片编号不再靠 i+1 推算，改由 TRACKS[i].n 指定（见上方修正说明） */
 
 const $ = s => document.querySelector(s);
 const player=$('#player'), bg=$('#bg');
@@ -203,9 +204,7 @@ document.addEventListener('contextmenu', e=>e.preventDefault());
 const openDB=()=>new Promise((res,rej)=>{const r=indexedDB.open('mutown-groove',1);
   r.onupgradeneeded=()=>r.result.createObjectStore('files');
   r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
-const dbPut=(k,v)=>new Promise(res=>{const t=db.transaction('files','readwrite');t.objectStore('files').put(v,k);t.oncomplete=()=>res();});
 const dbGet=k=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>res(null);});
-const dbKeys=()=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').getAllKeys();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>res([]);});
 
 /* ── 票据 ── */
 async function ensureTicket(){
@@ -220,14 +219,25 @@ function paint(){
   const tr = TRACKS[idx] || TRACKS[0];
   $('#song').textContent = tr.t;
   $('#artist').textContent = tr.a;
-  document.querySelectorAll('#rows .row').forEach((r,k)=>r.classList.toggle('on', k===idx));
+  // 音柱（正在播放的跳动标记）跟着当前曲目走
+  // 2026-09-18 修：原来音柱只在首次渲染时插进对应项，之后切歌不再重建 → 它永远停在老位置
+  document.querySelectorAll('#rows .row').forEach((r,k)=>{
+    const cur = (k===idx);
+    r.classList.toggle('on', cur);
+    let eq = r.querySelector('.eq');
+    if(cur && !eq){
+      eq = document.createElement('span'); eq.className='eq';
+      eq.innerHTML = '<i></i><i></i><i></i>';
+      r.appendChild(eq);
+    } else if(!cur && eq){ eq.remove(); }
+  });
 }
 
 /* ── 播放 ── */
 async function playIdx(i, autoplay=true){
   if(i<0||i>=TRACKS.length) return;
   idx=i; paint();
-  const song = KEY(i);
+  const song = TRACKS[i].n;
 
   // 在线：走 Worker 加密分片
   if(navigator.onLine && await ensureTicket()){
@@ -323,7 +333,6 @@ mask.onclick = ()=>openSheet(false);
 
 /* ── 列表渲染 ── */
 async function renderRows(){
-  const keys = await dbKeys(); const local = keys.length;
   $('#rows').innerHTML='';
   TRACKS.forEach((tr,i)=>{
     const d=document.createElement('div'); d.className='row'+(i===idx?' on':'');
@@ -333,28 +342,11 @@ async function renderRows(){
     d.onclick=()=>{ playIdx(i); openSheet(false); };
     $('#rows').appendChild(d);
   });
-  $('#tip').textContent = local>=TRACKS.length
-    ? '✅ 已存 '+local+' 首到手机 —— 断网也能听'
-    : '贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首';
+  $('#tip').textContent = '贴一下 NFC 挂件打开本页 · 点 ▶ 开播 · 放完自动下一首';
 }
 
-/* ── 存到手机（离线用）── */
-const picker=$('#picker');
-const doPick=()=>picker.click();
+/* ── 播放列表抽屉入口（2026-09-18 按毛毛要求：离线缓存整块删除 —— 本页只在线听、不提供下载）── */
 $('#listChip').onclick = ()=>openSheet(true);
-$('#saveBtn2').onclick = doPick;
-picker.addEventListener('change', async e=>{
-  const fs=[...e.target.files];
-  $('#tip').textContent='正在存到手机…（'+fs.length+' 个）';
-  for(const f of fs){
-    const nm=f.name; const m=nm.match(/^(\d{1,2})\b/);      // 文件名以编号开头就按编号存
-    const k = m ? String(Number(m[1])).padStart(2,'0')
-                : (TRACKS.findIndex(t=>nm.includes(t.t))+1 ? String(TRACKS.findIndex(t=>nm.includes(t.t))+1).padStart(2,'0') : nm);
-    await dbPut(k,f);
-  }
-  for(const k in urls) delete urls[k];
-  await renderRows();
-});
 
 /* ── 网络状态 ── */
 function netUI(){ const on=navigator.onLine; $('#net').className='dot'+(on?'':' off');
