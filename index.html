@@ -365,16 +365,6 @@ function initHls(){
   OffLoader.prototype = Object.create(Base.prototype);
   OffLoader.prototype.load = function(context, config, callbacks){
     const self=this, goNet=()=>Base.prototype.load.call(self, context, config, callbacks);
-    // ① 本地索引表（/local/NN/index.m3u8）→ 直接从手机里取
-    const lm = /\/local\/(\d\d)\//.exec(context.url);
-    if(lm){
-      dbGet('m3u8/'+lm[1]).then(txt=>{
-        if(txt) callbacks.onSuccess({ url:context.url, data:txt, code:200 }, context, null);
-        else goNet();
-      }).catch(goNet);
-      return;
-    }
-    // ② 分片 → 本地有就解密后给（断网也能放）
     const k = segKeyOf(context.url);
     if(!k) return goNet();
     dbGet(k).then(rec=>{
@@ -410,10 +400,7 @@ async function playIdx(i, autoplay=true, seekTo=null){
     if(localM3U8 && window.Hls && Hls.isSupported()){
       wantPlay = autoplay; switching = true;
       if(!hls) initHls();
-      // 用「本地专用地址」交给 hls.js，具体由下面的 loader 从手机里取。
-      // 注意：这里原来用的是 blob: 地址 —— 实测切歌时 hls.js 对它支持不稳
-      // （飞行模式下只有当时正在放的那首能出声，切别的就没声），所以换掉。
-      hls.loadSource(API + '/local/' + song + '/index.m3u8');
+      hls.loadSource(URL.createObjectURL(new Blob([localM3U8], { type:'application/vnd.apple.mpegurl' })));
       return;
     }
   }catch(e){}
