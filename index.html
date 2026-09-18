@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mutown Grooove · NFC 音乐</title>
+<meta name="theme-color" content="#1a1030">
+<style>
+  :root{--bg:#12081f;--card:#1f1236;--acc:#a06bff;--txt:#f0e9ff;--dim:#9c8bbd}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:linear-gradient(160deg,#12081f,#1a0f2e 60%,#0d1a24);
+       color:var(--txt);font:16px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+       padding:22px 16px 40px;min-height:100vh;-webkit-user-select:none;user-select:none}
+  h1{font-size:21px;margin:0 0 3px;letter-spacing:.4px}
+  .sub{color:var(--dim);font-size:12.5px;margin-bottom:16px}
+  .state{background:var(--card);border-radius:13px;padding:11px 13px;font-size:13.5px;
+         margin-bottom:14px;border:1px solid #2e1f52}
+  .state b{color:var(--acc)}
+  #playAll{background:linear-gradient(135deg,#a06bff,#6bd0ff);color:#150726;border:0;
+     border-radius:14px;padding:16px;font-size:17px;font-weight:800;width:100%;
+     margin-bottom:8px;letter-spacing:.5px}
+  button.ghost{background:#2a1b4a;color:var(--txt);border:1px solid #3d2a66;border-radius:12px;
+     padding:12px 16px;font-size:14.5px;font-weight:600;width:100%;margin-top:8px}
+  ul{list-style:none;margin:0;padding:0}
+  li{background:var(--card);border:1px solid #2e1f52;border-radius:12px;padding:11px 13px;
+     margin-bottom:7px;display:flex;align-items:center;gap:9px;cursor:pointer}
+  li.on{border-color:var(--acc);background:#2a1450}
+  .n{color:var(--acc);font-weight:700;min-width:20px;font-size:14px}
+  .t{flex:1;font-size:14.5px}
+  audio{width:100%;margin-top:12px;filter:invert(.9) hue-rotate(180deg)}
+  .hint{color:var(--dim);font-size:12px;margin-top:10px;text-align:center;line-height:1.5}
+</style>
+</head>
+<body>
+  <h1>Mutown Grooove</h1>
+  <div class="sub">Muse Dash 原创角色曲专辑 · 10 首</div>
+
+  <div class="state" id="state">正在检查…</div>
+  <button id="playAll">▶ 播放专辑</button>
+  <button class="ghost" id="modeBtn">🔁 列表循环</button>
+
+  <ul id="list"></ul>
+  <audio id="player" controls preload="metadata" controlsList="nodownload noplaybackrate"
+         disablePictureInPicture oncontextmenu="return false"></audio>
+
+  <div id="pickBox" hidden>
+    <p class="hint">想让**断网也能听**？点下面把专辑选一次，存进手机浏览器（只用做一次）。</p>
+    <input id="picker" type="file" accept="audio/*" multiple hidden>
+    <button class="ghost" id="pickBtn">把音乐存到手机（一次性）</button>
+  </div>
+  <p class="hint" id="tip"></p>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<script>
+/* ── 代理地址（Cloudflare Worker，零冷启动）── */
+const API = 'https://nfc-tap.maomao1ovo1.workers.dev';
+
+const TRACKS = [
+  '1 见习恶魔(Buro)','2 糖果味觉(Buro)','3 假面日记(Buro)','4 暮色小诗(Rin)',
+  '5 你是我永不落空的期待(Marija)','6 Signal 信号(Rin)','7 恋爱巡航(Buro)',
+  '8 摩登时代的孤独(Rin)','9 漫漫长夜(Marija)','10 雨天诗集(Marija)'
+];
+const $ = s => document.querySelector(s);
+const stateEl=$('#state'), listEl=$('#list'), player=$('#player');
+let db=null, curIdx=-1, ticket=null, sigs={}, expAt=0, hls=null;
+const urls={};
+
+/* 禁右键/长按（防"另存为"） */
+document.addEventListener('contextmenu', e=>e.preventDefault());
+player.addEventListener('contextmenu', e=>e.preventDefault());
+
+/* ── IndexedDB：本地那份（断网用）── */
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open('mutown-groove',1);
+  r.onupgradeneeded=()=>r.result.createObjectStore('files');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+const dbPut=(k,v)=>new Promise(res=>{const t=db.transaction('files','readwrite');t.objectStore('files').put(v,k);t.oncomplete=()=>res();});
+const dbGet=(k)=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>res(null);});
+const dbKeys=()=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').getAllKeys();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>res([]);});
+
+/* ── 票据（30 分钟，每次进页面取一次）── */
+async function ensureTicket(){
+  if(ticket && Date.now() < expAt) return true;
+  try{
+    const r = await fetch(API + '/api/ticket');
+    if(!r.ok) return false;
+    const j = await r.json();
+    ticket = j.ticket; sigs = j.sigs || {}; expAt = Date.now() + (j.ttl - 120) * 1000;
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ── 播放 ── */
+async function playIdx(i){
+  if(i<0 || i>=TRACKS.length) return;
+  document.querySelectorAll('li').forEach((x,k)=>x.classList.toggle('on', k===i));
+  curIdx = i;
+  const name = TRACKS[i], song = String(i+1).padStart(2,'0');
+
+  if(navigator.onLine && await ensureTicket()){
+    const url = API + '/hls/' + song + '/index.m3u8?t=' + encodeURIComponent(ticket) + '&s=' + encodeURIComponent(sigs[song]||'');
+    stateEl.innerHTML = '🔒 在线播放（<b>加密分片</b> · 拿不到文件）';
+    if(window.Hls && Hls.isSupported()){
+      if(hls) hls.destroy();
+      hls = new Hls({ xhrSetup:(x)=>x.setRequestHeader('Referer', location.href) });
+      hls.loadSource(url); hls.attachMedia(player);
+      hls.on(Hls.Events.MANIFEST_PARSED, ()=>{ player.play().catch(()=>{}); });
+      return;
+    }
+    player.src = url; player.play().catch(()=>{}); return;
+  }
+
+  // 断网 / 取票失败 → 本地那份
+  if(!urls[name]){ const b = await dbGet(name); if(b) urls[name] = URL.createObjectURL(b); }
+  if(urls[name]){ stateEl.innerHTML='📴 本地播放（离线那份）'; player.src=urls[name]; player.play().catch(()=>{}); }
+  else stateEl.innerHTML='⚠️ 没网、本地也没存过这首 —— 先连网听一次，或点下面存一份';
+}
+
+/* ── 四种模式 ── */
+const MODES=['order','all','one','shuffle'];
+const MODE_TXT={order:'➡️ 顺序播放',all:'🔁 列表循环',one:'🔂 单曲循环',shuffle:'🔀 随机播放'};
+let mode = localStorage.getItem('mg-mode')||'all'; if(!MODES.includes(mode)) mode='all';
+function applyMode(){ $('#modeBtn').textContent = MODE_TXT[mode]; localStorage.setItem('mg-mode',mode); }
+function nextIdx(){
+  if(mode==='one') return curIdx;
+  if(mode==='shuffle'){ if(TRACKS.length<2) return curIdx;
+    let n; do{ n=Math.floor(Math.random()*TRACKS.length);}while(n===curIdx); return n; }
+  const nx=curIdx+1; if(nx<TRACKS.length) return nx; return mode==='all'?0:-1;
+}
+player.addEventListener('ended', ()=>{ const n=nextIdx(); if(n>=0) playIdx(n); });
+
+async function render(){
+  const keys = await dbKeys();
+  listEl.innerHTML='';
+  TRACKS.forEach((name,i)=>{ const li=document.createElement('li');
+    li.innerHTML='<span class="n">'+(i+1)+'</span><span class="t">'+name+'</span>';
+    li.onclick=()=>playIdx(i); listEl.appendChild(li); });
+  const n=keys.length;
+  stateEl.innerHTML = (n>=TRACKS.length) ? ('✅ 本地已存 <b>'+n+'</b> 首 —— 断网也能播')
+    : '🔒 在线播放（分片加密）· 想断网听就点下面存一份';
+  $('#pickBox').hidden = n>=TRACKS.length;
+  $('#tip').textContent='贴一下 NFC 挂件打开本页 → 点「▶ 播放专辑」→ 放完自动下一首';
+}
+
+$('#playAll').onclick = ()=>playIdx(0);
+$('#modeBtn').onclick = ()=>{ mode = MODES[(MODES.indexOf(mode)+1)%MODES.length]; applyMode(); };
+$('#pickBtn').onclick = ()=>$('#picker').click();
+$('#picker').addEventListener('change', async e=>{
+  const fs=[...e.target.files]; stateEl.textContent='正在存到手机…（'+fs.length+' 个）';
+  for(const f of fs){ const base=f.name.replace(/\.(flac|mp3|wav|m4a|ogg)$/i,''); await dbPut(base,f); }
+  for(const k in urls) delete urls[k];
+  await render();
+});
+window.addEventListener('online', ()=>stateEl.innerHTML='🌐 已联网 —— 走加密在线播放');
+window.addEventListener('offline', ()=>stateEl.innerHTML='📴 断网了 —— 自动切本地那份');
+
+(async function(){
+  try{ db = await openDB(); }catch(e){}
+  if('serviceWorker' in navigator){ try{ await navigator.serviceWorker.register('./sw.js'); }catch(e){} }
+  await render(); applyMode();
+  ensureTicket();
+})();
+</script>
+</body>
+</html>
