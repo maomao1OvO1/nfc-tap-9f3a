@@ -130,6 +130,34 @@
         transition:opacity .3s}
   .mask.on{opacity:1;pointer-events:auto}
   .hint{text-align:center;font-size:11.5px;color:rgba(255,247,255,.42);margin-top:12px;line-height:1.6}
+  /* ── 宽屏适配（电脑 / 手机开「电脑版网站」）──────────────────────
+     手机上是竖着一列；一旦视口变宽（≥820px），改成左右分栏：
+     封面固定在左侧一列，歌名/进度/按钮/徽章全部排到右边。
+     不然在桌面视口下会变成中间一条窄缝、两边全空。 */
+  @media (min-width: 820px){
+    .wrap{max-width:900px;display:flex;flex-wrap:wrap;align-content:flex-start;
+          column-gap:46px;padding:36px 44px 48px}
+    .top{flex:0 0 100%}
+    .cover{flex:0 0 300px;width:300px;max-width:300px;margin:8px 0 0}
+    .meta,.prog,.ctrl,.foot,.hint,.src{flex:1 1 calc(100% - 346px);min-width:0}
+    .meta{text-align:left;margin-bottom:22px}
+    .song{font-size:30px}
+    .artist{font-size:15px}
+    .album{font-size:12px}
+    .ctrl{justify-content:flex-start;gap:24px}
+    .foot{justify-content:flex-start}
+    .foot .chip{flex:0 0 auto;padding:11px 22px}
+    .hint{text-align:left}
+    .src{align-items:flex-start;margin:20px 0 0}
+    /* 抽屉和模式面板在宽屏下别铺满整屏，居中一点更像样 */
+    .sheet{max-width:520px;left:50%;right:auto;width:100%;
+           transform:translate(-50%,102%)}
+    .sheet.open{transform:translate(-50%,0)}
+    .modepanel{max-width:400px;left:50%;right:auto;width:100%;
+           transform:translate(-50%,102%)}
+    .modepanel.open{transform:translate(-50%,0)}
+  }
+
   /* 专辑出处（dizzylab 徽章）——低调放底部，不抢播放器 */
   .src{display:flex;flex-direction:column;align-items:center;gap:8px;margin:18px 0 6px;opacity:.85}
   .src img{display:block;border-radius:8px}
