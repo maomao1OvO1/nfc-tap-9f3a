@@ -506,6 +506,10 @@ async function playLocal(song, autoplay, seekTo){
 async function playIdx(i, autoplay=true, seekTo=null){
   if(i<0||i>=TRACKS.length) return;
   idx=i; paint();
+  // ★ 切歌一瞬间就把进度条归位并挂上「缓冲中」：
+  //   以前这里什么都不做，上一首的进度/数字会一直挂着，
+  //   加上 hls.js 换流要几秒（弱网十几秒），看着就像「进度条坏了」。
+  progressReset(); setBuffering(true);
   if(seekTo!=null) pendingSeek = seekTo;
   const song = TRACKS[i].n;
 
@@ -524,7 +528,7 @@ async function playIdx(i, autoplay=true, seekTo=null){
   curSong = song;
   if(navigator.onLine){
     const url = await mediaUrl(song, 'index.m3u8');
-    if(!url){ $('#tip').textContent='⚠️ 现在连不上服务器，等有网了再点一下播放'; return; }
+    if(!url){ setBuffering(false); $('#tip').textContent='⚠️ 现在连不上服务器，等有网了再点一下播放'; return; }
     if(window.Hls && Hls.isSupported()){
       wantPlay = autoplay; switching = true;
       if(!hls) initHls();
@@ -653,13 +657,56 @@ window.addEventListener('resize', ()=>{ if(WAVE.cv) WAVE.cv.width = 0; });
 /* ── 进度条 ── */
 const fmt=s=>{ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60), x=Math.floor(s%60);
   return m+':'+String(x).padStart(2,'0'); };
+
+/* ★ 取「当前这首歌的有效总时长」（2026-09-19 修「切歌后进度条不显示、拖不动」）
+   为什么不能直接用 player.duration：
+     hls.js 加载新流的头几秒（弱网下实测能到 12 秒）player.duration 是 NaN，
+     这段时间进度条画不出来、拖动也被 isFinite 判断拦掉 —— 表现就是「切歌后进度条废了」。
+   所以按三级兜底取时长：
+     ① 播放器自己算出来的（最准，正常播放中就是它）
+     ② hls.js 已经解析好的播放清单总时长 —— 它比 ① 早得多，切歌一瞬间就有
+     ③ 已缓冲到的末端（最后的保险）
+   一个都没有才返回 0（这时界面显示 --:--，如实告诉用户「还不知道多长」）。 */
+function mediaDuration(){
+  const d = player.duration;
+  if(typeof d === 'number' && isFinite(d) && d > 0) return d;
+  try{
+    if(hls && hls.levels && hls.levels.length){
+      for(const lv of hls.levels){
+        const td = lv && lv.details && lv.details.totalduration;
+        if(typeof td === 'number' && isFinite(td) && td > 0) return td;
+      }
+    }
+  }catch(e){}
+  try{
+    if(player.buffered.length) return player.buffered.end(player.buffered.length - 1);
+  }catch(e){}
+  return 0;
+}
+
+/* 切歌 / 首次加载：进度条先归位，别把上一首的数字留在那儿骗人 */
+function progressReset(){
+  $('#fill').style.width = '0%';
+  $('#knob').style.left  = '0%';
+  $('#cur').textContent  = '0:00';
+  $('#dur').textContent  = '--:--';
+}
+/* 缓冲提示：只在「自己挂上的那句话」还在时才清除，不覆盖真正的错误提示 */
+const BUFTIP = '⏳ 正在缓冲…';
+function setBuffering(on){
+  const tip = $('#tip');
+  if(on){ tip.textContent = BUFTIP; }
+  else if(tip.textContent === BUFTIP){ tip.textContent = ''; }
+}
+
 function tickUI(){
   if(dragging) return;
-  const d=player.duration||0, c=player.currentTime||0;
+  const d = mediaDuration(), c = player.currentTime || 0;
   const p = d? (c/d*100):0;
   $('#fill').style.width = p+'%';
   $('#knob').style.left  = p+'%';
-  $('#cur').textContent = fmt(c); $('#dur').textContent = fmt(d);
+  $('#cur').textContent = fmt(c);
+  $('#dur').textContent = d? fmt(d) : '--:--';   // 还不知道多长就显示 --:--，不假装是 0:00
 }
 player.addEventListener('timeupdate', tickUI);
 player.addEventListener('loadedmetadata', tickUI);
@@ -669,7 +716,10 @@ player.addEventListener('ended', ()=>{ const n=nextIdx(); if(n>=0) playIdx(n); }
 player.addEventListener('loadedmetadata', ()=>{
   if(pendingSeek!=null){ try{ player.currentTime = pendingSeek; }catch(e){} pendingSeek=null; }
 });
-player.addEventListener('play', ()=>{ $('#playIcon').innerHTML='<path d="M7 5h4v14H7zm6 0h4v14h-4z"/>';
+/* 缓冲够了（有数据可播）就撤掉「正在缓冲…」：
+   用 canplay 而不是只管 play —— 暂停状态换源、或用户没让它自动播时也能正确撤掉 */
+player.addEventListener('canplay', ()=>setBuffering(false));
+player.addEventListener('play', ()=>{ setBuffering(false); $('#playIcon').innerHTML='<path d="M7 5h4v14H7zm6 0h4v14h-4z"/>';
   $('#cover').classList.add('playing'); mediaMeta(); mediaState('playing'); saveState(); waveStart(); });
 player.addEventListener('pause',()=>{ $('#playIcon').innerHTML='<path d="M7 5v14l12-7z"/>';
   $('#cover').classList.remove('playing');
@@ -696,7 +746,8 @@ const ratioOf = e => { const r=bar.getBoundingClientRect();
 function paintBar(p){
   $('#fill').style.width = (p*100)+'%';
   $('#knob').style.left  = (p*100)+'%';
-  if(isFinite(player.duration) && player.duration>0) $('#cur').textContent = fmt(p*player.duration);
+  const d = mediaDuration();                       // ★ 同上：不直接用 player.duration
+  if(d > 0) $('#cur').textContent = fmt(p*d);
 }
 bar.addEventListener('pointerdown', e=>{
   dragging = true; bar.classList.add('active');
@@ -710,7 +761,11 @@ bar.addEventListener('pointermove', e=>{
 const endSeek = () => {
   if(!dragging) return;
   dragging = false; bar.classList.remove('active');
-  if(isFinite(player.duration) && player.duration>0){ player.currentTime = pendingRatio * player.duration; }
+  const d = mediaDuration();
+  // ★ 关键修复：以前这里写的是 isFinite(player.duration) ——
+  //   切歌后的十几秒里 player.duration 是 NaN，于是「拖了没反应」。
+  //   现在用三级兜底时长，只要知道歌多长就一定把位置落下去。
+  if(d > 0){ try{ player.currentTime = pendingRatio * d; }catch(e){} }
   tickUI();
 };
 bar.addEventListener('pointerup', endSeek);
