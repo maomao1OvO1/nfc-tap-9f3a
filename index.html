@@ -106,6 +106,9 @@
   .row .no{width:22px;text-align:center;font-size:12.5px;color:var(--dim);font-variant-numeric:tabular-nums}
   .row.on .no{color:var(--pink);font-weight:800}
   .row .nm{flex:1;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 听歌时长：等宽数字，免得每秒跳动时右边的东西跟着抖 */
+  .row .lt{flex:none;font-size:12px;opacity:.5;margin-left:8px;font-variant-numeric:tabular-nums}
+  .listTotal{font-size:12px;font-weight:400;opacity:.6}
   .row .who{font-size:11.5px;color:var(--dim);margin-top:1px}
   .row .eq{display:flex;gap:2px;align-items:flex-end;height:13px}
   .row .eq i{width:2.5px;background:var(--pink);border-radius:2px;animation:eq .9s ease-in-out infinite}
@@ -235,7 +238,7 @@
 
 <div class="mask" id="mask"></div>
 <div class="sheet" id="sheet">
-  <h3>播放列表 · 10 首</h3>
+  <h3>播放列表 · 10 首<span id="listTotal" class="listTotal"></span></h3>
   <div id="rows"></div>
 </div>
 
@@ -540,6 +543,7 @@ async function playLocal(song, autoplay, seekTo){
 async function playIdx(i, autoplay=true, seekTo=null){
   if(i<0||i>=TRACKS.length) return;
   idx=i; paint();
+  listenLastT = 0;   // ★ 切歌重置时长统计的参照点，免得把两首之间的跳变算进新歌
   // ★ 切歌一瞬间就把进度条归位并挂上「缓冲中」：
   //   以前这里什么都不做，上一首的进度/数字会一直挂着，
   //   加上 hls.js 换流要几秒（弱网十几秒），看着就像「进度条坏了」。
@@ -753,6 +757,51 @@ function tickUI(){
   $('#cur').textContent = fmt(c);
   $('#dur').textContent = d? fmt(d) : '--:--';   // 还不知道多长就显示 --:--，不假装是 0:00
 }
+/* ── 听歌时长统计（2026-09-19 毛毛要求：每首各算一份 + 全部合计）──
+   只统计「真的在听」的那部分：
+     · 暂停时不计；
+     · 拖动进度条 / 切歌会造成 currentTime 跳变（delta 很大或为负）→ 不计；
+     · 相邻两次 timeupdate 之间正常推进约 0.25 秒，所以把 1.5 秒当阈值。
+   存 localStorage，节流 3 秒落一次盘（和 mg-state / mg-mode 一个路子）。 */
+const LKEY='mg-listen';
+let listen={};
+try{ listen = JSON.parse(localStorage.getItem(LKEY)||'{}') || {}; }catch(e){ listen={}; }
+const saveListen=()=>{ try{ localStorage.setItem(LKEY, JSON.stringify(listen)); }catch(e){} };
+
+/* 累计时长的人话格式：不到 1 分钟报秒，不到 1 小时报分，超过 1 小时报「X 时 Y 分」 */
+const fmtListen = s => {
+  s = Math.floor(s||0);
+  if(s < 60) return s + ' 秒';
+  const h = Math.floor(s/3600), m = Math.floor(s%3600/60);
+  return h ? (h + ' 时 ' + m + ' 分') : (m + ' 分');
+};
+
+/* 只刷新数字、不重建列表 —— 重建会让正在播的那首掉动画，也会闪 */
+function paintListen(){
+  let total = 0;
+  TRACKS.forEach(tr => { total += listen[tr.n] || 0; });
+  const el = $('#listTotal');
+  if(el) el.textContent = total > 0 ? ' · 累计 ' + fmtListen(total) : '';
+  const rows = document.querySelectorAll('#rows .row');
+  rows.forEach((row, i) => {
+    const cell = row.querySelector('.lt');
+    if(cell) cell.textContent = fmtListen(listen[TRACKS[i].n] || 0);
+  });
+}
+
+let listenLastT = 0, listenSavedAt = 0;
+player.addEventListener('timeupdate', ()=>{
+  const t = player.currentTime || 0;
+  const delta = t - listenLastT;
+  listenLastT = t;
+  if(player.paused || idx < 0 || !(delta > 0) || delta > 1.5) return;   // 暂停/拖动/切歌都不计
+  const k = TRACKS[idx].n;
+  listen[k] = (listen[k]||0) + delta;
+  const now = Date.now();
+  if(now - listenSavedAt > 3000){ listenSavedAt = now; saveListen(); paintListen(); }
+});
+player.addEventListener('pause', saveListen);
+
 player.addEventListener('timeupdate', tickUI);
 player.addEventListener('loadedmetadata', tickUI);
 player.addEventListener('durationchange', tickUI);
@@ -948,10 +997,12 @@ async function renderRows(){
     d.innerHTML='<span class="no">'+(i+1)+'</span>'+
       '<div style="flex:1;min-width:0"><div class="nm">'+tr.t+'</div>'+
         '<div class="who">'+(tr.v||tr.r)+(tr.r?'（'+tr.r+'）':'')+(tr.w?' · 词 '+tr.w:'')+'</div></div>'+
+      '<span class="lt">'+fmtListen(listen[tr.n]||0)+'</span>'+
       (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'');
     d.onclick=()=>{ playIdx(i); openSheet(false); };
     $('#rows').appendChild(d);
   });
+  paintListen();        // 列表重建后把时长数字补上
 }
 
 /* ── 播放列表抽屉入口（2026-09-18 按毛毛要求：离线缓存整块删除 —— 本页只在线听、不提供下载）── */
