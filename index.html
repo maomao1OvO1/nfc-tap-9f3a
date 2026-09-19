@@ -820,6 +820,36 @@ if('mediaSession' in navigator){
   on('seekto',        e=>{ if(e.seekTime!=null) player.currentTime = e.seekTime; });
 }
 
+/* ③ 系统媒体面板的进度条上报（2026-09-19 修：悬浮岛/锁屏只显示播放、不显示进度）
+   为什么：系统面板（锁屏 / 通知栏 / 灵动胶囊 / 悬浮岛）上的那条进度，靠 setPositionState
+   单独上报 —— 只设 metadata（歌名/封面）+ playbackState（播放/暂停）的话，面板知道
+   「在放一首歌」，但不知道「放到哪、总共多长」，进度条就是空的。
+   注意：这跟页面里那条进度条是两套东西（页面那条 027a48c 已修），
+        也跟 seekTo 动作不是一回事 —— 「能拖」不代表「看得见进度」。
+   坑（都踩过）：① 调用太频繁系统会静默忽略 → 节流到约 1 秒一次；
+              ② 时长沿用 mediaDuration() 的三级兜底，拿不到就跳过，
+                 硬塞 Infinity/NaN 会抛异常，反而把整条上报打断。 */
+let mediaPosTick = 0;
+function mediaPos(force){
+  if(!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+  const now = Date.now();
+  if(!force && now - mediaPosTick < 950) return;          // ① 节流
+  const d = mediaDuration();                              // ② 复用三级兜底
+  if(!isFinite(d) || d <= 0) return;                      // ③ 时长不合法就不报
+  try{
+    navigator.mediaSession.setPositionState({
+      duration: d,
+      playbackRate: player.playbackRate || 1,
+      position: Math.min(Math.max(player.currentTime || 0, 0), d)
+    });
+    mediaPosTick = now;
+  }catch(e){}
+}
+player.addEventListener('timeupdate',     ()=>mediaPos());
+player.addEventListener('loadedmetadata', ()=>mediaPos(true));
+player.addEventListener('durationchange', ()=>mediaPos(true));
+player.addEventListener('playing',        ()=>mediaPos(true));
+
 
 /* ── 播放模式面板（2026-09-18 毛毛要求）──
    原来点模式按钮只能「循环盲切」四种模式，看不出有哪几种、也看不出当前是哪个；
