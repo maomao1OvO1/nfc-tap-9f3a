@@ -109,6 +109,12 @@
   /* 听歌时长：等宽数字，免得每秒跳动时右边的东西跟着抖 */
   .row .lt{flex:none;font-size:12px;opacity:.5;margin-left:8px;font-variant-numeric:tabular-nums}
   .listTotal{font-size:12px;font-weight:400;opacity:.6}
+  /* 清空听歌时长：次要按钮，故意做得低调 —— 它是破坏性操作，不该显眼 */
+  .dlfoot{margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.08);text-align:center}
+  .btn2{background:transparent;color:#c9b8e8;border:1px solid rgba(255,255,255,.18);
+        border-radius:10px;padding:9px 18px;font-size:13px;font-family:inherit}
+  .btn2:active{background:rgba(255,255,255,.08)}
+  .dlfoot .hint{font-size:11.5px;opacity:.45;margin-top:8px}
   .row .who{font-size:11.5px;color:var(--dim);margin-top:1px}
   .row .eq{display:flex;gap:2px;align-items:flex-end;height:13px}
   .row .eq i{width:2.5px;background:var(--pink);border-radius:2px;animation:eq .9s ease-in-out infinite}
@@ -240,6 +246,10 @@
 <div class="sheet" id="sheet">
   <h3>播放列表 · 10 首<span id="listTotal" class="listTotal"></span></h3>
   <div id="rows"></div>
+  <div class="dlfoot">
+    <button class="btn2" id="clearListen">清空听歌时长</button>
+    <div class="hint">时长只存在这台设备的浏览器里，不上传、不同步</div>
+  </div>
 </div>
 
 <!-- 播放模式选择面板（点模式按钮或底部「模式」标签弹出） -->
@@ -1004,6 +1014,16 @@ async function renderRows(){
   });
   paintListen();        // 列表重建后把时长数字补上
 }
+
+/* 清空听歌时长（2026-09-19 毛毛要求）
+   破坏性操作 → 先二次确认再清；而且只清 mg-listen 这一项，
+   播放记录（mg-state）、播放模式（mg-mode）、离线缓存一律不碰。 */
+$('#clearListen').onclick = ()=>{
+  if(!confirm('确定清空所有听歌时长统计？\n\n只清统计，不影响播放记录、播放模式和离线缓存。')) return;
+  listen = {};
+  saveListen();
+  paintListen();
+};
 
 /* ── 播放列表抽屉入口（2026-09-18 按毛毛要求：离线缓存整块删除 —— 本页只在线听、不提供下载）── */
 $('#listChip').onclick = ()=>openSheet(true);
