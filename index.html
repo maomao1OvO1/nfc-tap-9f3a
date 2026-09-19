@@ -110,6 +110,10 @@
   .row .lt{flex:none;font-size:12px;opacity:.5;margin-left:8px;font-variant-numeric:tabular-nums}
   .listTotal{font-size:12px;font-weight:400;opacity:.6}
   /* 清空听歌时长：次要按钮，故意做得低调 —— 它是破坏性操作，不该显眼 */
+  /* 单曲清空的小 ✕：只在「有听歌时长」时才出现，做得淡，别抢主信息 */
+  .row .lx{flex:none;width:24px;height:24px;line-height:24px;text-align:center;margin-left:2px;
+           font-size:12px;opacity:.32;border-radius:50%}
+  .row .lx:active{background:rgba(255,255,255,.16);opacity:.9}
   .dlfoot{margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.08);text-align:center}
   .btn2{background:transparent;color:#c9b8e8;border:1px solid rgba(255,255,255,.18);
         border-radius:10px;padding:9px 18px;font-size:13px;font-family:inherit}
@@ -1008,8 +1012,22 @@ async function renderRows(){
       '<div style="flex:1;min-width:0"><div class="nm">'+tr.t+'</div>'+
         '<div class="who">'+(tr.v||tr.r)+(tr.r?'（'+tr.r+'）':'')+(tr.w?' · 词 '+tr.w:'')+'</div></div>'+
       '<span class="lt">'+fmtListen(listen[tr.n]||0)+'</span>'+
+      /* 有统计才给 ✕ —— 没听过的歌不用挂一个清空按钮上去 */
+      ((listen[tr.n]||0) > 0 ? '<span class="lx" data-n="'+tr.n+'" title="清空这首">✕</span>' : '')+
       (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'');
-    d.onclick=()=>{ playIdx(i); openSheet(false); };
+    d.onclick=(e)=>{
+      // ✕ 的直接绑在行上，冒泡顺序靠不住 —— 所以在这里就地判断
+      const x = e.target.closest('.lx');
+      if(x){
+        const n = x.dataset.n;
+        const tr2 = TRACKS.find(v=>v.n===n);
+        if(confirm('清空《'+(tr2?tr2.t:n)+'》的听歌时长？')){
+          delete listen[n]; saveListen(); paintListen();
+        }
+        return;
+      }
+      playIdx(i); openSheet(false);
+    };
     $('#rows').appendChild(d);
   });
   paintListen();        // 列表重建后把时长数字补上
