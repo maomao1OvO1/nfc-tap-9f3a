@@ -110,6 +110,17 @@
   /* 每首的听歌时长：右列对齐、等宽数字 —— 不要跟歌手名抢注意力 */
   .row .lt{flex:none;min-width:52px;text-align:right;font-size:12.5px;
            color:rgba(255,247,255,.5);margin-left:10px;font-variant-numeric:tabular-nums}
+  /* 桌面端（鼠标）的时长清空入口：hover 才浮现，平时完全不占视觉 ——
+     手机开「电脑版网站」拿不到可靠的长按，鼠标 hover 才是那个环境里的标准做法。
+     用宽度断点而不是 hover:hover，因为手机开电脑版时物理上仍是触摸屏。 */
+  .row .more{flex:none;width:26px;height:26px;line-height:26px;text-align:center;margin-left:6px;
+             font-size:15px;border-radius:50%;opacity:0;pointer-events:none;
+             transition:opacity .18s;color:rgba(255,247,255,.6)}
+  @media (min-width: 820px){
+    .row:hover .more{opacity:1;pointer-events:auto}
+    .row:hover{background:rgba(255,255,255,.05)}
+    .row .more:hover{background:rgba(255,255,255,.16);opacity:1}
+  }
   /* 累计收听：独立一块、数字放大 —— 这是这一页唯一的「成就数据」，
      值得有自己的位置，而不是挤在标题后面当一串尾巴 */
   .stats{margin:4px 0 14px;padding:13px 16px;border-radius:16px;display:flex;align-items:baseline;gap:9px;
@@ -1063,17 +1074,27 @@ async function renderRows(){
       '<div style="flex:1;min-width:0"><div class="nm">'+tr.t+'</div>'+
         '<div class="who">'+(tr.v||tr.r)+(tr.r?'（'+tr.r+'）':'')+(tr.w?' · 词 '+tr.w:'')+'</div></div>'+
       '<span class="lt">'+((listen[tr.n]||0)>0?fmtListen(listen[tr.n]):'')+'</span>'+
-      (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'');
+      (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'')+
+      /* 桌面端 hover 才浮出来的入口（触摸端 opacity:0 且 pointer-events:none，不参与交互） */
+      '<span class="more" data-n="'+tr.n+'" title="清空这首的时长">⋯</span>';
     /* 长按曲目 → 动作面板（移动端标准手势）。
-       早先这里挂过一个 ✕，毛毛指出「后面放个 X 不好看」—— 长按既干净又是通用交互。 */
-    let lpTimer=null, lpFire=false;
-    d.addEventListener('pointerdown', ()=>{
-      lpFire=false;
+       早先这里挂过一个 ✕，毛毛指出「后面放个 X 不好看」—— 长按既干净又是通用交互。
+       ★ 2026-09-19 修：原先 pointermove 一有动静就清定时器，鼠标按住时手抖一下长按就废了
+         （手机开「电脑版网站」时指针变成鼠标，立刻暴露）。现在只有移动超过 10px 才算滑动。 */
+    let lpTimer=null, lpFire=false, lpX=0, lpY=0;
+    d.addEventListener('pointerdown', e=>{
+      lpFire=false; lpX=e.clientX; lpY=e.clientY;
       lpTimer=setTimeout(()=>{ lpFire=true; askClear(TRACKS[i].n); }, 480);
     });
-    ['pointerup','pointercancel','pointerleave','pointermove'].forEach(ev=>
-      d.addEventListener(ev, ()=>clearTimeout(lpTimer)));
-    d.onclick=()=>{
+    const cancelLp = ()=>{ clearTimeout(lpTimer); };
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=> d.addEventListener(ev, cancelLp));
+    d.addEventListener('pointermove', e=>{
+      if(Math.hypot(e.clientX-lpX, e.clientY-lpY) > 10) cancelLp();   // 只有真的滑动才取消
+    });
+    d.onclick=(e)=>{
+      // 桌面端 hover 出来的 ⋯
+      const more = e.target.closest('.more');
+      if(more){ askClear(more.dataset.n); return; }
       if(lpFire){ lpFire=false; return; }        // 长按已经开了面板，别再触发播放
       playIdx(i); openSheet(false);
     };
