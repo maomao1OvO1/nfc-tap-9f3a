@@ -280,6 +280,15 @@ const $ = s => document.querySelector(s);
 const player=$('#player'), bg=$('#bg');
 let db=null, idx=-1, ticket=null, sigs={}, sigsTicket=null, expAt=0, hls=null, curSong=null;
 let switching=false, wantPlay=true, pendingSeek=null;   // 切歌中 / 本次加载后是否自动播 / 待恢复的进度
+/* ★ 本地流的时间轴原点（2026-09-19 修「本地打开比无痕多 1 秒」）
+   本地播放（playLocal）是把 TS 分片直接喂给 MSE，而 TS 分片自带 PTS、第一片通常不从 0 开始
+   —— 这台机器上是 1 秒。于是 player.duration 比真实时长多出这一段，界面上的当前时间也从
+   0:01 起算、进度条永远差一点到不了头、拖动落点也整体偏 1 秒。
+   hls.js 会自己做时间轴对齐，所以网络模式没这毛病。
+   统一约定：媒体时间(mediaTime) = 真实时间 + localOff0；对外一律只暴露真实时间。 */
+let localOff0 = 0;                                        // 0 表示当前不是本地流
+const toUi    = t => Math.max(0, (t || 0) - localOff0);    // 媒体时间 → 真实时间
+const toMedia = t => (t || 0) + localOff0;                 // 真实时间 → 媒体时间
 const SKEY='mg-state';                                  // 播放状态存档键（刷新后回到原处）
 const urls={}; let dragging=false;
 
@@ -516,11 +525,14 @@ async function playLocal(song, autoplay, seekTo){
   try{
     if(player.buffered.length){
       const s0 = player.buffered.start(0);
+      localOff0 = s0;              // ★ 记下首片 PTS 偏移，供 mediaDuration/进度显示/拖动换算
       if(player.currentTime < s0) player.currentTime = s0;
+    }else{
+      localOff0 = 0;
     }
-  }catch(e){}
+  }catch(e){ localOff0 = 0; }
 
-  if(seekTo!=null){ try{ player.currentTime = seekTo; }catch(e){} }
+  if(seekTo!=null){ try{ player.currentTime = toMedia(seekTo); }catch(e){} }
   if(autoplay) player.play().catch(()=>{});
   return true;
 }
@@ -553,7 +565,8 @@ async function playIdx(i, autoplay=true, seekTo=null){
     }
   }catch(e){}
 
-  // ② 在线：走 Worker 加密分片
+  // ② 在线：走 Worker 加密分片（本地流的 PTS 偏移在这里清零）
+  localOff0 = 0;
   curSong = song;
   if(navigator.onLine){
     const url = await mediaUrl(song, 'index.m3u8');
@@ -698,7 +711,10 @@ const fmt=s=>{ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60), x=Math.floor
    一个都没有才返回 0（这时界面显示 --:--，如实告诉用户「还不知道多长」）。 */
 function mediaDuration(){
   const d = player.duration;
-  if(typeof d === 'number' && isFinite(d) && d > 0) return d;
+  if(typeof d === 'number' && isFinite(d) && d > 0){
+    // 本地流要把首片的 PTS 偏移减掉才是真实时长（网络流 localOff0 恒为 0，不受影响）
+    return localOff0 > 0 ? Math.max(0, d - localOff0) : d;
+  }
   try{
     if(hls && hls.levels && hls.levels.length){
       for(const lv of hls.levels){
@@ -730,7 +746,7 @@ function setBuffering(on){
 
 function tickUI(){
   if(dragging) return;
-  const d = mediaDuration(), c = player.currentTime || 0;
+  const d = mediaDuration(), c = toUi(player.currentTime);   // 本地流要减去首片 PTS 偏移
   const p = d? (c/d*100):0;
   $('#fill').style.width = p+'%';
   $('#knob').style.left  = p+'%';
@@ -749,7 +765,7 @@ player.addEventListener('durationchange', tickUI);
    另外 applyMode() 里会同步 player.loop，让浏览器自己也兜一层。 */
 player.addEventListener('ended', ()=>{
   if(mode === 'one'){
-    try{ player.currentTime = 0; }catch(e){}
+    try{ player.currentTime = toMedia(0); }catch(e){}
     player.play().catch(()=>{});
     return;
   }
@@ -774,7 +790,8 @@ let saveTick=0;
 function saveState(){
   if(idx<0) return;
   try{
-    localStorage.setItem(SKEY, JSON.stringify({ i:idx, t:player.currentTime||0, p:!player.paused, at:Date.now() }));
+    // 存的是「真实时间」，这样本地流和网络流之间切换时进度不会整体偏一秒
+    localStorage.setItem(SKEY, JSON.stringify({ i:idx, t:toUi(player.currentTime), p:!player.paused, at:Date.now() }));
   }catch(e){}
 }
 player.addEventListener('timeupdate', ()=>{ const n=Date.now(); if(n-saveTick>3000){ saveTick=n; saveState(); } });
@@ -808,7 +825,7 @@ const endSeek = () => {
   // ★ 关键修复：以前这里写的是 isFinite(player.duration) ——
   //   切歌后的十几秒里 player.duration 是 NaN，于是「拖了没反应」。
   //   现在用三级兜底时长，只要知道歌多长就一定把位置落下去。
-  if(d > 0){ try{ player.currentTime = pendingRatio * d; }catch(e){} }
+  if(d > 0){ try{ player.currentTime = toMedia(pendingRatio * d); }catch(e){} }
   tickUI();
 };
 bar.addEventListener('pointerup', endSeek);
@@ -861,9 +878,9 @@ if('mediaSession' in navigator){
   on('pause',         ()=>player.pause());
   on('previoustrack', ()=>playIdx(idx<=0 ? TRACKS.length-1 : idx-1));
   on('nexttrack',     ()=>{ const n=nextIdx(); playIdx(n>=0?n:0); });
-  on('seekbackward',  ()=>{ player.currentTime = Math.max(0, player.currentTime-10); });
+  on('seekbackward',  ()=>{ player.currentTime = Math.max(toMedia(0), player.currentTime-10); });  // 退到真实起点，而不是媒体时间的 0
   on('seekforward',   ()=>{ player.currentTime = Math.min(player.duration||0, player.currentTime+10); });
-  on('seekto',        e=>{ if(e.seekTime!=null) player.currentTime = e.seekTime; });
+  on('seekto',        e=>{ if(e.seekTime!=null) player.currentTime = toMedia(e.seekTime); });
 }
 
 /* ③ 系统媒体面板的进度条上报（2026-09-19 修：悬浮岛/锁屏只显示播放、不显示进度）
