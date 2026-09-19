@@ -412,8 +412,11 @@ function initHls(){
   };
   hls = new Hls({
     enableWorker: true, loader: OffLoader,
-    maxBufferLength: 60, maxMaxBufferLength: 120,
-    maxBufferSize: 60*1000*1000, backBufferLength: 30,
+    /* 缓冲区（2026-09-19 加大）：原来 60 秒 —— 切后台后 Chrome 拿不到网络、
+       不再拉新分片，一分钟缓冲一耗尽播放就断。加到 10/20 分钟 + 200MB，
+       后台能撑过整首歌甚至几首；再配合「存到手机」的离线模式就彻底不吃网络了。 */
+    maxBufferLength: 600, maxMaxBufferLength: 1200,
+    maxBufferSize: 200*1000*1000, backBufferLength: 30,
   });
   hls.attachMedia(player);
   hls.on(Hls.Events.MANIFEST_PARSED, ()=>{ switching=false; if(wantPlay) player.play().catch(()=>{}); });
@@ -711,7 +714,21 @@ function tickUI(){
 player.addEventListener('timeupdate', tickUI);
 player.addEventListener('loadedmetadata', tickUI);
 player.addEventListener('durationchange', tickUI);
-player.addEventListener('ended', ()=>{ const n=nextIdx(); if(n>=0) playIdx(n); });
+/* 播放结束（2026-09-19 修「单曲循环有问题」）
+   以前不管什么模式都调 playIdx(nextIdx()) —— 单曲循环时 nextIdx() 返回自己，
+   于是又走一遍完整切歌流程（进度归零 + 重新拉流/缓冲），听着像"卡一下重来"，
+   某些分支还会直接不播。现在分两条路：
+     · 单曲循环 → 原地回到 0 秒继续播，绝不重载流
+     · 其他模式 → 正常切下一首
+   另外 applyMode() 里会同步 player.loop，让浏览器自己也兜一层。 */
+player.addEventListener('ended', ()=>{
+  if(mode === 'one'){
+    try{ player.currentTime = 0; }catch(e){}
+    player.play().catch(()=>{});
+    return;
+  }
+  const n = nextIdx(); if(n>=0) playIdx(n);
+});
 /* 新流加载完成后，把上次的位置接回去（刷新页面也能接着听） */
 player.addEventListener('loadedmetadata', ()=>{
   if(pendingSeek!=null){ try{ player.currentTime = pendingSeek; }catch(e){} pendingSeek=null; }
@@ -776,6 +793,9 @@ const MODES=['all','one','shuffle','order'];
 const MODE_TXT={order:'➡️ 顺序播放',all:'🔁 列表循环',one:'🔂 单曲循环',shuffle:'🔀 随机播放'};
 let mode=localStorage.getItem('mg-mode')||'all'; if(!MODES.includes(mode)) mode='all';
 const applyMode=()=>{ $('#modeChip').textContent=MODE_TXT[mode]; localStorage.setItem('mg-mode',mode);
+  /* 单曲循环时交给 <audio> 自己 loop —— 浏览器原生行为最可靠，
+     不依赖 ended 事件（hls.js 某些情况下 ended 不一定触发） */
+  try{ player.loop = (mode === 'one'); }catch(e){}
   // 面板里把当前模式点亮（打开面板就知道现在是哪个）
   document.querySelectorAll('#modePanel .mrow').forEach(r=>r.classList.toggle('on', r.dataset.m===mode)); };
 function nextIdx(){
