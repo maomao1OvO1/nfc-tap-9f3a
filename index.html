@@ -326,6 +326,8 @@ async function decBuf(buf){
   const u8=new Uint8Array(buf);
   return await crypto.subtle.decrypt({name:'AES-GCM',iv:u8.slice(0,12)}, key, u8.subarray(12));
 }
+/* 离线缓存不完整的曲目（2026-09-19）：坏缓存只标记、不自动删 —— 删用户的缓存要本人点头 */
+const offlineBad = new Set();
 const segKeyOf = url => { const m=/\/hls\/(\d\d)\/([^?]+)/.exec(url); return m ? 'seg/'+m[1]+'/'+m[2] : null; };
 
 
@@ -478,16 +480,31 @@ async function playLocal(song, autoplay, seekTo){
 
   const waitDone = () => new Promise(res => sb.addEventListener('updateend', res, { once:true }));
 
+  /* ★ 统计缺口（2026-09-19 修「只有某一首不循环」的根本原因）：
+     分片缺失、解密失败、写入失败 —— 以前三处全是静默 continue，最后还无条件 return true。
+     可是 MSE 的时间轴一旦断一个口，表现就是「卡住不出声 + duration 算错 + ended 永不触发」，
+     正好对应「单曲循环到结尾不重播、直接停」。而且它报成功 → 永远不回退网络 → 一直卡着。
+     现在有缺口就交回上层走网络，并记进 offlineBad 提示重存（坏缓存只标记，不自动删）。 */
+  let gaps = 0;
   for(let n=0; n<segs.length; n++){
     if(token.aborted) return true;
     const rec = await dbGet(segKeyOf(segs[n]));
-    if(!rec) continue;
+    if(!rec){ gaps++; continue; }
     let data;
-    try{ data = await decBuf(rec); }catch(e){ continue; }   // 解密在本地完成
+    try{ data = await decBuf(rec); }catch(e){ gaps++; continue; }   // 解密在本地完成
     if(sb.updating) await waitDone();
-    try{ sb.appendBuffer(data); }catch(e){ try{ await waitDone(); sb.appendBuffer(data); }catch(e2){} }
+    try{ sb.appendBuffer(data); }catch(e){ try{ await waitDone(); sb.appendBuffer(data); }catch(e2){ gaps++; } }
   }
   if(token.aborted) return true;
+
+  if(gaps > 0){
+    console.warn('[离线] ' + song + ' 缺 ' + gaps + '/' + segs.length + ' 个分片 → 改走网络');
+    offlineBad.add(song);
+    try{ if(sb) ms.removeSourceBuffer(sb); }catch(e){}
+    try{ ms.endOfStream(); }catch(e){}
+    try{ player.pause(); player.removeAttribute('src'); player.load(); }catch(e){}
+    return false;                       // 交回 playIdx → 走网络那条路
+  }
   if(sb.updating) await waitDone();
   try{ ms.endOfStream(); }catch(e){}
 
@@ -524,6 +541,11 @@ async function playIdx(i, autoplay=true, seekTo=null){
       const ok = await playLocal(song, autoplay, seekTo);
       switching = false;
       if(ok) return;
+      /* 本地那份放不成（缺分片/解密失败）—— playLocal 已把它记进 offlineBad。
+         这里不再死磕，继续往下走网络那条路，保证「至少能听」。 */
+      if(offlineBad.has(song)){
+        $('#tip').textContent = '⚠️ 这首歌的离线缓存不完整，已改用网络播放 —— 建议重新「⬇ 存到手机」一次';
+      }
     }
   }catch(e){}
 
