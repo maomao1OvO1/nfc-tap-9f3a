@@ -107,13 +107,25 @@
   .row.on .no{color:var(--pink);font-weight:800}
   .row .nm{flex:1;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* 听歌时长：等宽数字，免得每秒跳动时右边的东西跟着抖 */
-  .row .lt{flex:none;font-size:12px;opacity:.5;margin-left:8px;font-variant-numeric:tabular-nums}
+  /* 每首的听歌时长：右列对齐、等宽数字 —— 不要跟歌手名抢注意力 */
+  .row .lt{flex:none;min-width:52px;text-align:right;font-size:12.5px;
+           color:rgba(255,247,255,.5);margin-left:10px;font-variant-numeric:tabular-nums}
+  /* 累计收听：独立一块、数字放大 —— 这是这一页唯一的「成就数据」，
+     值得有自己的位置，而不是挤在标题后面当一串尾巴 */
+  .stats{margin:4px 0 14px;padding:13px 16px;border-radius:16px;display:flex;align-items:baseline;gap:9px;
+         background:linear-gradient(135deg,rgba(255,95,162,.15),rgba(160,107,255,.09));
+         border:1px solid rgba(255,255,255,.1)}
+  .stats b{font-size:23px;font-weight:800;letter-spacing:.4px;font-variant-numeric:tabular-nums;
+           background:linear-gradient(90deg,#ffa4c4,#c9adff);-webkit-background-clip:text;
+           background-clip:text;color:transparent}
+  .stats span{font-size:11.5px;color:var(--dim);letter-spacing:.3px}
+  /* 动作面板的说明行 + 危险项用本站粉，而不是系统红 */
+  .actdesc{font-size:13px;color:var(--dim);margin:0 4px 12px;line-height:1.65}
+  .actdesc b{color:#ffd0e0;font-weight:700}
+  #actOk{color:#ff9dbe}
+  #actOk .mk{filter:none}
   .listTotal{font-size:12px;font-weight:400;opacity:.6}
   /* 清空听歌时长：次要按钮，故意做得低调 —— 它是破坏性操作，不该显眼 */
-  /* 单曲清空的小 ✕：只在「有听歌时长」时才出现，做得淡，别抢主信息 */
-  .row .lx{flex:none;width:24px;height:24px;line-height:24px;text-align:center;margin-left:2px;
-           font-size:12px;opacity:.32;border-radius:50%}
-  .row .lx:active{background:rgba(255,255,255,.16);opacity:.9}
   .dlfoot{margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.08);text-align:center}
   .btn2{background:transparent;color:#c9b8e8;border:1px solid rgba(255,255,255,.18);
         border-radius:10px;padding:9px 18px;font-size:13px;font-family:inherit}
@@ -247,12 +259,22 @@
 </div>
 
 <div class="mask" id="mask"></div>
+
+<!-- 动作面板（长按曲目 / 清空时长共用）—— 刻意复用 modePanel 的观感，
+     不用系统 confirm：那东西跟本站的毛玻璃圆角完全两个世界（毛毛明确要求） -->
+<div class="modepanel" id="actPanel">
+  <h3 id="actTitle">清空听歌时长</h3>
+  <div class="actdesc" id="actDesc"></div>
+  <div class="mrow" id="actOk"><span class="mk">🗑</span><span id="actOkText">清空</span></div>
+  <div class="mrow" id="actCancel"><span class="mk">↩︎</span>取消</div>
+</div>
 <div class="sheet" id="sheet">
-  <h3>播放列表 · 10 首<span id="listTotal" class="listTotal"></span></h3>
+  <h3>播放列表 · 10 首</h3>
+  <div class="stats" id="statsBox"><b id="statsNum">0 秒</b><span id="statsLbl">累计收听 · 只存本机</span></div>
   <div id="rows"></div>
   <div class="dlfoot">
     <button class="btn2" id="clearListen">清空听歌时长</button>
-    <div class="hint">时长只存在这台设备的浏览器里，不上传、不同步</div>
+    <div class="hint">长按某首歌可单独清空它的时长<br>时长只存在这台设备的浏览器里，不上传、不同步</div>
   </div>
 </div>
 
@@ -792,14 +814,17 @@ const fmtListen = s => {
 
 /* 只刷新数字、不重建列表 —— 重建会让正在播的那首掉动画，也会闪 */
 function paintListen(){
-  let total = 0;
-  TRACKS.forEach(tr => { total += listen[tr.n] || 0; });
-  const el = $('#listTotal');
-  if(el) el.textContent = total > 0 ? ' · 累计 ' + fmtListen(total) : '';
+  let total = 0, heard = 0;
+  TRACKS.forEach(tr => { const v = listen[tr.n]||0; total += v; if(v > 0) heard++; });
+  const num = $('#statsNum'), lbl = $('#statsLbl');
+  if(num) num.textContent = total > 0 ? fmtListen(total) : '0 秒';
+  if(lbl) lbl.textContent = total > 0
+    ? ('累计收听 · ' + heard + '/' + TRACKS.length + ' 首 · 只存本机')
+    : '还没听过 · 只存本机';
   const rows = document.querySelectorAll('#rows .row');
   rows.forEach((row, i) => {
     const cell = row.querySelector('.lt');
-    if(cell) cell.textContent = fmtListen(listen[TRACKS[i].n] || 0);
+    if(cell) cell.textContent = (listen[TRACKS[i].n]||0) > 0 ? fmtListen(listen[TRACKS[i].n]) : '';
   });
 }
 
@@ -1001,7 +1026,33 @@ const openSheet=o=>{ if(o) modePanel.classList.remove('open');
   sheet.classList.toggle('open',o);
   mask.classList.toggle('on', o || modePanel.classList.contains('open')); };
 $('#listBtn').onclick = ()=>openSheet(true);
-mask.onclick = ()=>{ openSheet(false); openMode(false); };
+/* ── 通用动作确认面板（2026-09-19 毛毛要求：别用系统 confirm，太丑）──
+   复用 modePanel 的观感；与抽屉/模式面板互斥；遮罩点击即取消。 */
+const actPanel=$('#actPanel');
+let actOnOk=null;
+const openAct=o=>{ if(o){ sheet.classList.remove('open'); modePanel.classList.remove('open'); }
+  actPanel.classList.toggle('open', o);
+  mask.classList.toggle('on', o || sheet.classList.contains('open') || modePanel.classList.contains('open')); };
+const closeAct=()=>{ actOnOk=null; openAct(false); };
+
+/* 组装「清空某首 / 清空全部」的文案与动作；没听过就不弹，省得点了个空面板 */
+function askClear(scope){
+  const list = scope ? TRACKS.filter(t=>t.n===scope) : TRACKS;
+  const secs = list.reduce((a,t)=>a+(listen[t.n]||0), 0);
+  if(secs <= 0) return;
+  const tr = scope ? TRACKS.find(t=>t.n===scope) : null;
+  $('#actTitle').textContent = scope ? '清空这一首' : '清空全部听歌时长';
+  $('#actDesc').innerHTML = scope
+    ? '《'+(tr?tr.t:scope)+'》目前累计 <b>'+fmtListen(secs)+'</b>'
+    : '10 首合计 <b>'+fmtListen(secs)+'</b><br>只清统计 —— 播放记录、播放模式、离线缓存都不动';
+  $('#actOkText').textContent = scope ? '清空这一首' : '全部清空';
+  actOnOk = ()=>{ if(scope){ delete listen[scope]; } else { listen = {}; } saveListen(); paintListen(); };
+  openAct(true);
+}
+$('#actCancel').onclick = closeAct;
+$('#actOk').onclick = ()=>{ const f=actOnOk; closeAct(); if(f) f(); };
+
+mask.onclick = ()=>{ openSheet(false); openMode(false); closeAct(); };
 
 /* ── 列表渲染 ── */
 async function renderRows(){
@@ -1011,21 +1062,19 @@ async function renderRows(){
     d.innerHTML='<span class="no">'+(i+1)+'</span>'+
       '<div style="flex:1;min-width:0"><div class="nm">'+tr.t+'</div>'+
         '<div class="who">'+(tr.v||tr.r)+(tr.r?'（'+tr.r+'）':'')+(tr.w?' · 词 '+tr.w:'')+'</div></div>'+
-      '<span class="lt">'+fmtListen(listen[tr.n]||0)+'</span>'+
-      /* 有统计才给 ✕ —— 没听过的歌不用挂一个清空按钮上去 */
-      ((listen[tr.n]||0) > 0 ? '<span class="lx" data-n="'+tr.n+'" title="清空这首">✕</span>' : '')+
+      '<span class="lt">'+((listen[tr.n]||0)>0?fmtListen(listen[tr.n]):'')+'</span>'+
       (i===idx?'<span class="eq"><i></i><i></i><i></i></span>':'');
-    d.onclick=(e)=>{
-      // ✕ 的直接绑在行上，冒泡顺序靠不住 —— 所以在这里就地判断
-      const x = e.target.closest('.lx');
-      if(x){
-        const n = x.dataset.n;
-        const tr2 = TRACKS.find(v=>v.n===n);
-        if(confirm('清空《'+(tr2?tr2.t:n)+'》的听歌时长？')){
-          delete listen[n]; saveListen(); paintListen();
-        }
-        return;
-      }
+    /* 长按曲目 → 动作面板（移动端标准手势）。
+       早先这里挂过一个 ✕，毛毛指出「后面放个 X 不好看」—— 长按既干净又是通用交互。 */
+    let lpTimer=null, lpFire=false;
+    d.addEventListener('pointerdown', ()=>{
+      lpFire=false;
+      lpTimer=setTimeout(()=>{ lpFire=true; askClear(TRACKS[i].n); }, 480);
+    });
+    ['pointerup','pointercancel','pointerleave','pointermove'].forEach(ev=>
+      d.addEventListener(ev, ()=>clearTimeout(lpTimer)));
+    d.onclick=()=>{
+      if(lpFire){ lpFire=false; return; }        // 长按已经开了面板，别再触发播放
       playIdx(i); openSheet(false);
     };
     $('#rows').appendChild(d);
@@ -1036,12 +1085,7 @@ async function renderRows(){
 /* 清空听歌时长（2026-09-19 毛毛要求）
    破坏性操作 → 先二次确认再清；而且只清 mg-listen 这一项，
    播放记录（mg-state）、播放模式（mg-mode）、离线缓存一律不碰。 */
-$('#clearListen').onclick = ()=>{
-  if(!confirm('确定清空所有听歌时长统计？\n\n只清统计，不影响播放记录、播放模式和离线缓存。')) return;
-  listen = {};
-  saveListen();
-  paintListen();
-};
+$('#clearListen').onclick = ()=> askClear(null);
 
 /* ── 播放列表抽屉入口（2026-09-18 按毛毛要求：离线缓存整块删除 —— 本页只在线听、不提供下载）── */
 $('#listChip').onclick = ()=>openSheet(true);

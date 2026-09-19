@@ -5,12 +5,12 @@
 //   等它失败（几秒白屏）才回落，用户看到的就是「打不开」。
 //   现在反过来：缓存里有就直接给（0 等待），同时后台悄悄联网更新一份。
 //
-// 2026-09-19 升 v9 → v10（**必须升**）：
+// 2026-09-19 升 v10 → v11（**必须升**）：
 //   本次改的是 index.html（切歌后进度条的总时长兜底 + 缓冲提示）。
 //   而本 SW 是「缓存优先」—— 不升版本号，用户第一次打开拿到的还是缓存里的旧页面，
 //   会以为「根本没修好」。升一档 → 浏览器把它当新 SW 重新安装 → install 里
 //   cache.addAll 才会去拉最新的 index.html。
-const CACHE = 'mutown-groove-v10';   // 版本号升一档 → 旧的 v9 缓存会在 activate 时自动清掉
+const CACHE = 'mutown-groove-v11';   // 版本号升一档 → 旧的 v10 缓存会在 activate 时自动清掉
 const ASSETS = ['./', './index.html', './hls.min.js', './cover.jpg'];
 
 self.addEventListener('install', e=>{
