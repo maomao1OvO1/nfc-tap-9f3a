@@ -293,6 +293,8 @@ const openDB=()=>new Promise((res,rej)=>{const r=indexedDB.open('mutown-groove',
 const dbGet=k=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>res(null);});
 const dbPut=(k,v)=>new Promise(res=>{const t=db.transaction('files','readwrite');t.objectStore('files').put(v,k);t.oncomplete=()=>res();});
 const dbKeys=()=>new Promise(res=>{const t=db.transaction('files','readonly');const q=t.objectStore('files').getAllKeys();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>res([]);});
+/* 删单个键（2026-09-19 加：清失效的离线缓存用）。注意：只删键，不做整库操作 */
+const dbDel=k=>new Promise(res=>{try{const t=db.transaction('files','readwrite');t.objectStore('files').delete(k);t.oncomplete=()=>res(true);t.onerror=()=>res(false);}catch(e){res(false);}});
 
 /* ══════ 本地播放（读手机里已存的加密分片 · 2026-09-18）══════
    注：整首「下载」功能已于同日按毛毛要求移除（防批量扒取），
@@ -544,7 +546,9 @@ async function playIdx(i, autoplay=true, seekTo=null){
       /* 本地那份放不成（缺分片/解密失败）—— playLocal 已把它记进 offlineBad。
          这里不再死磕，继续往下走网络那条路，保证「至少能听」。 */
       if(offlineBad.has(song)){
-        $('#tip').textContent = '⚠️ 这首歌的离线缓存不完整，已改用网络播放 —— 建议重新「⬇ 存到手机」一次';
+        /* 提示里不提「重新存到手机」—— 那个下载入口 09-18 已按毛毛要求移除，重存不可能了；
+         改告诉他真正能做的事：用 ?freshaudio=1 清掉失效的离线缓存。 */
+        $('#tip').textContent = '⚠️ 这首歌的离线缓存不完整，已自动改用网络播放（清掉它：网址后加 ?freshaudio=1）';
       }
     }
   }catch(e){}
@@ -948,6 +952,19 @@ $('#listChip').onclick = ()=>openSheet(true);
     return;
   }
   try{ db=await openDB(); }catch(e){}
+  /* 「清音频缓存」入口（2026-09-19 修《恋爱巡航》时加的）：
+     背景：手机里那批离线分片是 09-18 之前存的（约 227 片），其中 08 缺片；
+           而「存到手机」的下载入口已按毛毛要求移除 → 坏掉的那份没地方重存，
+           旧的 ?fresh=1 只清 SW/Cache Storage，**碰不到 IndexedDB**，所以修不了它。
+     做法：网址后加 ?freshaudio=1 → 只删 IndexedDB 里的音频键（seg/* 与 m3u8/*），
+           之后所有歌改走网络（画面照常，只是不再离线）。播放记录与设置一律不动。
+     注意：必须在 openDB 之后执行 —— 这一条就放在它下面。 */
+  if(new URLSearchParams(location.search).has('freshaudio')){
+    let n=0;
+    try{ for(const k of await dbKeys()){ if(k.startsWith('seg/') || k.startsWith('m3u8/')){ if(await dbDel(k)) n++; } } }catch(e){}
+    location.replace(location.pathname + '?cleared=' + n);
+    return;
+  }
   if('serviceWorker' in navigator){ try{ await navigator.serviceWorker.register('./sw.js'); }catch(e){} }
   applyMode(); await renderRows(); paint();
   ensureTicket();
