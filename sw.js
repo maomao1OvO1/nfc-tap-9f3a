@@ -4,7 +4,13 @@
 //   原来写的是「网络优先，失败回落缓存」—— 问题是断网时浏览器要先去试网络、
 //   等它失败（几秒白屏）才回落，用户看到的就是「打不开」。
 //   现在反过来：缓存里有就直接给（0 等待），同时后台悄悄联网更新一份。
-const CACHE = 'mutown-groove-v2';   // 版本号升一档 → 旧的 v1 缓存会在 activate 时自动清掉
+//
+// 2026-09-19 升 v2 → v3（**必须升**）：
+//   本次改的是 index.html（切歌后进度条的总时长兜底 + 缓冲提示）。
+//   而本 SW 是「缓存优先」—— 不升版本号，用户第一次打开拿到的还是缓存里的旧页面，
+//   会以为「根本没修好」。升一档 → 浏览器把它当新 SW 重新安装 → install 里
+//   cache.addAll 才会去拉最新的 index.html。
+const CACHE = 'mutown-groove-v3';   // 版本号升一档 → 旧的 v1 缓存会在 activate 时自动清掉
 const ASSETS = ['./', './index.html', './hls.min.js', './cover.jpg'];
 
 self.addEventListener('install', e=>{
