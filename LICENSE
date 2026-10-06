@@ -1,21 +1,12 @@
-MIT License
+Copyright (c) 2026 maomao1OvO1. All Rights Reserved.
 
-Copyright (c) 2026 maomao1OvO1
+本仓库源码公开，仅供浏览、学习与参考。
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+未经版权持有人事先书面许可，任何人不得：
+1. 将本源码（全部或部分）用于任何产品、项目或服务；
+2. 修改、改编、翻译或以其他方式创作衍生作品；
+3. 复制、发布、分发、出租、出售或以其他方式传播；
+4. 移除或更改本声明。
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+本仓库不授权任何人 fork、克隆、下载或以任何形式复制本源码；GitHub 平台功能所允许的查看与 fork 不构成任何使用授权。
+本源码按「现状」提供，不附带任何明示或默示的担保。
