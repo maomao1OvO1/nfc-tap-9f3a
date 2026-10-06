@@ -76,10 +76,10 @@
 | 换封面 | 直接替换 `cover.jpg` |
 | 换播放内核 | 替换 `hls.min.js` |
 
-改完推上去：
+改完推上去（**点名要提交的文件，别用 `git add -A`** —— 本地躺着 8 个 `index.bak-before-*.html` 备份，`-A` 会把它们一起带上）：
 
 ```bash
-git add -A && git commit -m "改了什么" && git push
+git add index.html && git commit -m "改了什么" && git push
 ```
 
 ## 文件说明
@@ -90,6 +90,8 @@ git add -A && git commit -m "改了什么" && git push
 | `hls.min.js` | HLS 播放内核，**本地放一份**，不依赖外部 CDN（CDN 加载失败就没声音） |
 | `sw.js` | Service Worker：网络优先，断网时回落缓存 |
 | `cover.jpg` | 专辑封面 |
+| `dlcd06.svg` | 页面顶部的「Mutown Grooove @ dizzylab」标识图（250×80 矢量图） |
+| `.gitignore` | 忽略本地音频目录 `audio/` |
 
 ## 安全说明（别人能听，但拿不走）
 
